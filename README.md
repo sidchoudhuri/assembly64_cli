@@ -18,66 +18,82 @@ cp assembly64.py ~/.local/bin/assembly64
 ## Usage
 ```
 $ ./assembly64.py 
-usage: assembly64 [-h] {search,sid,cats} ...
+usage: assembly64 [-h] {search,sid,charts,presets,cats,reset,config} ...
 
 C64 scene lookup via the Assembly64 API (hackerswithstyle.se/leet/)
 
 positional arguments:
-  {search,sid,cats}
-    search           Search by name (CSDB demos) or AQL filters
-    sid              Search HVSC SID music by tune name
-    cats             List all categories
+  {search,sid,charts,presets,cats,reset,config}
+    search              Search by name or AQL filters
+    sid                 Search HVSC SID music by tune name
+    charts              Browse top charts
+    presets             Browse AQL query presets
+    cats                List all categories
+    reset               Reset the C64
+    config              Show or set saved configuration
 
 options:
-  -h, --help         show this help message and exit
+  -h, --help            show this help message and exit
 
 Commands:
-  search           Search by name or filters
-  sid    <query>   Search HVSC SID music (category 18)
-  cats             List all categories and repos
+  search  [query]  Search by name or AQL filters
+  sid     <query>  Search HVSC SID music
+  charts  [name]   Browse top charts
+  presets [type]   Browse AQL query presets
+  cats             List all categories
+  reset            Reset the C64 (uses saved IP or prompts)
+  config           Show/set saved config (e.g. default Ultimate IP)
 
-Name search (search/releases endpoint):
-  assembly64 search "edge of disgrace"         searches CSDB demos (cat 1)
-  assembly64 search "commando" --cat games     searches CSDB games (cat 0)
-  assembly64 search "commando" --cat 0         same, using category ID
-  assembly64 sid sanxion                       searches HVSC (cat 18)
+After selecting any item you'll be prompted to:
+  Run on Ultimate  — sends file to your C64 via REST API
+  Download         — saves to current directory
+  Quit
 
-Filter search (AQL, requires at least one --group/--handle/--repo/--cat/--date):
-  --group    group name (e.g. fairlight, "Booze Design")
-  --handle   scener handle (e.g. laxity)
+Flags bypass the prompt:
+  --download   download immediately
+  --run IP     run on Ultimate immediately
+  --files      show file list only, no action
+
+Save your Ultimate IP so you don't have to type it every time:
+  assembly64 config --set-ip 192.168.1.10
+
+Name search (uses search/releases):
+  assembly64 search "edge of disgrace"         CSDB demos (default)
+  assembly64 search "commando" --cat games     CSDB games
+  assembly64 sid sanxion                       HVSC SIDs
+
+AQL filter search (needs at least one of --group/--handle/--repo/--cat/--date):
+  --group    group name  e.g. fairlight, "Booze Design"
+  --handle   scener      e.g. laxity
   --repo     c64com, c64orgintro, commodore, csdb, gamebase64, guybrush, hvsc, mayhem, oneload, pres, seuck, tapes, utape
   --cat      demos, games, graphics, music, discmags, tools, sid, hvsc, misc, intros, c128, bbs, charts
-  --date     exact date YYYYMMDD / YYYYMM / YYYY
-  --after    released after YYYYMMDD
-  --before   released before YYYYMMDD
+  --date / --after / --before   YYYYMMDD
   --order    asc or desc
-  --limit    max results (default: 50)
-  --files    show file listing for selected item
-  --download download file(s) to current directory
+  --limit    max results (default 50)
 
 Examples:
   assembly64 search "edge of disgrace"
-  assembly64 search "edge of disgrace" --download
-  assembly64 search "commando" --cat games
-  assembly64 search --group fairlight --order asc
-  assembly64 search --group fairlight --after 20000101 --before 20101231
-  assembly64 search --group "Booze Design" --cat demos
+  assembly64 search --group fairlight --cat demos --order asc
+  assembly64 search --group "Booze Design" --after 20000101
   assembly64 search --handle laxity --repo csdb
   assembly64 sid sanxion
-  assembly64 sid sanxion --download
-  assembly64 cats
+  assembly64 charts
+  assembly64 presets
+  assembly64 config --set-ip 192.168.2.32
+        
+$ 
 ```
 ## Example: looking up the first 50 demos from Fairlight in descending order (newest first)
 ```
-$ ./assembly64.py search --group fairlight --cat demos --order desc
+sid@sid-macbookprom4 run % ./assembly64.py search --group fairlight --cat demos --order desc
 
   50 result(s):
 
-    1. Qdor Qdor  [Fairlight  2026-02-13  1]
-    2. The Hat  [Fairlight,Genesis Project  2026-02-01  1]
-    3. Crazy People  [Fairlight  1991-11-01  1]
+    1. Qdor Qdor  [Fairlight  2026-02-13  1 (demos)]
+    2. The Hat  [Fairlight,Genesis Project  2026-02-01  1 (demos)]
+    3. Crazy People  [Fairlight  1991-11-01  1 (demos)]
     4. Good Wheel 2025  [Fairlight  2025-01-01  37]
-    5. Good Wheel 2025  [Fairlight  2025-12-24  1]
+    5. Good Wheel 2025  [Fairlight  2025-12-24  1 (demos)]
     6. A Fayre Glow  [Fairlight  2025-01-01  37]
     7. Soya 50yo  [Fairlight  2025-01-01  37]
     8. The Safety Dudes  [Fairlight  2025-01-01  37]
@@ -93,76 +109,146 @@ $ ./assembly64.py search --group fairlight --cat demos --order desc
    18. OTech People III  [Fairlight  2025-01-01  37]
    19. The Raster Bar  [Fairlight  2024-01-01  37]
    20. Xmas 2024  [Fairlight  2024-01-01  37]
-   21. Panta 50  [Fairlight  2024-01-01  37]
-   22. Stars and Swipes  [Fairlight  2024-01-01  37]
-   23. The Demo Coder  [Fairlight  2024-01-01  37]
-   24. Stay Hungry  [Fairlight  2024-01-01  37]
-   25. Demo Retox  [Fairlight  2024-01-01  37]
-   26. Beergola 2024 Invite  [Fairlight  2024-01-01  37]
-   27. The Night the Beergola Boys Turned Into the BeergolaPågarna  [Fairlight  2024-01-01  37]
-   28. Eddie Demo  [Fairlight,Actual Cracking Force  37]
-   29. In Business_ No One Can Hear You Scream  [Fairlight  2024-01-01  37]
-   30. From the Deep of the North  [Fairlight  2024-01-01  37]
-   31. 1337  [Fairlight  2024-01-01  37]
-   32. The Ghost  [Genesis Project,Fairlight  2024-01-01  37]
-   33. Me & Batman  [Fairlight,Triad  2024-01-01  37]
-   34. Going 69 at 50  [Fairlight,Pretzel Logic,Lethargy,Atlantis,Bonzai  2024-01-01  37]
-   35. The Krampuses Xmas Demo 2023  [Pretzel Logic,Fairlight  2023-01-01  37]
-   36. The Night Before Christmas  [Fairlight  2023-01-01  37]
-   37. Fairlight Wishes a Merry Christmas 2023  [Fairlight  2023-01-01  37]
-   38. No Sprites  [Fairlight  2023-01-01  37]
-   39. Xmas 2023 Compo Invite  [Fairlight  2023-01-01  37]
-   40. Rushing  [Fairlight  2023-01-01  37]
-   41. Eyes  [Fairlight  2023-01-01  37]
-   42. Sir Epsilon  [Fairlight  2023-01-01  37]
-   43. The Emergent Behavior of Hydrogen Oxide at Altitude A Case Study  [Fairlight  2023-01-01  37]
-   44. Danko 50+  [Censor Design,Fairlight  2023-01-01  37]
-   45. Danko 50  [Censor Design,Fairlight  2023-01-01  37]
-   46. Bits and Flowers  [Fairlight  2023-01-01  37]
-   47. The Space is Broken  [Fairlight  2023-01-01  37]
-   48. The Scroll of Antonius  [Fairlight  2023-01-01  37]
-   49. 76 Rastersplits  [Fairlight  2023-01-01  37]
-   50. Looking for Atlantis  [Fairlight  2023-01-01  37]
 
-  Enter number to view details (or Enter to quit): 1
+  Showing 1-20 of 50  |  n/→=next  p/←=prev  q=quit
+
+  Enter number to view details: 1
 --------------------------------------------------------------
   Qdor Qdor
 --------------------------------------------------------------
-  ID:            259366
-  Category:      1
-  Group:         Fairlight
-  Handle:        hedning,Pal,redcrab,bepp,SkY,Norrland,Radiant,Pernod,Soya,Pitcher,Pantaloon,Stein Pedersen,Archmage,Frost,papademos,El Jefe,Trap,Trasher,Wix,Danko,Epsilon,tNG,Pastoelio,Bacchus,Trident,Qdor
-  Year:          2026
-  Released:      2026-02-13
+  ID:              259366
+  Category:        1 (demos)
+  Group:           Fairlight
+  Handle:          hedning,Pal,redcrab,bepp,SkY,Norrland,Radiant,Pernod,Soya,Pitcher,Pantaloon,Stein Pedersen,Archmage,Frost,papademos,El Jefe,Trap,Trasher,Wix,Danko,Epsilon,tNG,Pastoelio,Bacchus,Trident,Qdor
+  Year:            2026
+  Released:        2026-02-13
 --------------------------------------------------------------
+
+  Files:
+      1. qdor-qdor-75db9b39.d64  (174,848 bytes)
+
+  [1] Run on Ultimate (192.168.2.32)
+  [2] Download to current directory
+  [3] Quit
+
+  Choose action (or Enter to quit):               
+  
 $
 ```
-## Example: downloading Qdor Qdor, the demo we found in the prevous example
+## Example: directly downloading Qdor Qdor, the demo we found in the prevous example
 ```
-$ ./assembly64.py search "qdor qdor" --download
+$ ./assembly64.py search "qdor qdor" --download                    
 
   1 match(es):
 
     1. Qdor Qdor
 
-  Enter number to get details (or Enter to quit): 1
+  Showing 1-1 of 1
+
+  Enter number to get details: 1
 
   1 result(s):
 
-    1. Qdor Qdor  [Fairlight  2026-02-13  1]
+    1. Qdor Qdor  [Fairlight  2026-02-13  1 (demos)]
 
-  Enter number to view details (or Enter to quit): 1
+  Showing 1-1 of 1
+
+  Enter number to view details: 1
 --------------------------------------------------------------
   Qdor Qdor
 --------------------------------------------------------------
-  ID:            259366
-  Category:      1
-  Group:         Fairlight
-  Handle:        hedning,Pal,redcrab,bepp,SkY,Norrland,Radiant,Pernod,Soya,Pitcher,Pantaloon,Stein Pedersen,Archmage,Frost,papademos,El Jefe,Trap,Trasher,Wix,Danko,Epsilon,tNG,Pastoelio,Bacchus,Trident,Qdor
-  Year:          2026
-  Released:      2026-02-13
-
-  Downloading qdor-qdor-75db9b39.d64 ... done  (174,848 bytes)  ->  qdor-qdor-75db9b39.d64
+  ID:              259366
+  Category:        1 (demos)
+  Group:           Fairlight
+  Handle:          hedning,Pal,redcrab,bepp,SkY,Norrland,Radiant,Pernod,Soya,Pitcher,Pantaloon,Stein Pedersen,Archmage,Frost,papademos,El Jefe,Trap,Trasher,Wix,Danko,Epsilon,tNG,Pastoelio,Bacchus,Trident,Qdor
+  Year:            2026
+  Released:        2026-02-13
 --------------------------------------------------------------
+  Downloading qdor-qdor-75db9b39.d64 ... done  (174,848 bytes)
+  Saved  ->  qdor-qdor-75db9b39.d64
+$ 
+```
+## Example: Searching the demo charts and running a multi-disk demo on the C64 Ultimate
+```
+$ ./assembly64.py charts                       
+--------------------------------------------------------------
+  AVAILABLE CHARTS
+--------------------------------------------------------------
+    1. DEMOS
+    2. ONEFILE DEMOS
+    3. GAMES
+    4. MUSIC
+    5. GRAPHICS
+    6. TOOLS
+--------------------------------------------------------------
+
+  Enter number to view chart (or Enter to quit): 1
+--------------------------------------------------------------
+  CHART: DEMOS
+--------------------------------------------------------------
+    1. Aloft  []  *9.75
+    2. The Hat  []  *9.75
+    3. Next Level  []  *9.73
+    4. We Are The Anomaly  []  *9.68
+    5. 1337  []  *9.67
+    6. Codeboys & Endians  []  *9.67
+    7. Mojo  []  *9.65
+    8. Coma Light 13  []  *9.64
+    9. The Violators  []  *9.64
+   10. Edge of Disgrace  []  *9.62
+   11. Comaland 100%  []  *9.62
+   12. Bromance  []  *9.60
+   13. Uncensored  []  *9.60
+   14. No Bounds  []  *9.59
+   15. Fitty  []  *9.58
+   16. The Ghost  []  *9.57
+   17. What Is The Matrix 2  []  *9.57
+   18. Unboxed  []  *9.56
+   19. Lifecycle  []  *9.55
+   20. The XFile  []  *9.55
+
+  Showing 1-20 of 200  |  n/→=next  p/←=prev  q=quit
+
+  Enter number to view details: 5
+--------------------------------------------------------------
+  1337
+--------------------------------------------------------------
+  ID:              242855
+  Category:        1 (demos)
+  Rating:          9.6748466257669
+--------------------------------------------------------------
+
+  Files:
+      1. fairlight-1337-58679b69-a.d64  (196,608 bytes)
+      2. fairlight-1337-58679b69-b.d64  (196,608 bytes)
+      3. fairlight-1337-58679b69-c.d64  (196,608 bytes)
+      4. flip-info.txt  (98 bytes)
+
+  [1] Run on Ultimate (192.168.2.32)
+  [2] Download to current directory
+  [3] Quit
+
+  Choose action (or Enter to quit): 1
+
+  Multi-disk release — 3 disk image(s):
+    1. fairlight-1337-58679b69-a.d64  (196,608 bytes)
+    2. fairlight-1337-58679b69-b.d64  (196,608 bytes)
+    3. fairlight-1337-58679b69-c.d64  (196,608 bytes)
+
+  Downloading all disks...
+  Fetching fairlight-1337-58679b69-a.d64 ... done  (196,608 bytes)
+  Fetching fairlight-1337-58679b69-b.d64 ... done  (196,608 bytes)
+  Fetching fairlight-1337-58679b69-c.d64 ... done  (196,608 bytes)
+  Mounting fairlight-1337-58679b69-a.d64 on drive A: ... done  (200)
+  Resetting machine ... done
+  Waiting for BASIC prompt ... done
+  Injecting LOAD"*",8,1 + RUN ...
+
+  Press Enter when the demo asks for the next disk,
+  type a disk number to mount a specific one, or q to quit.
+  [Enter=disk 2, number, or q]: 
+  Mounting fairlight-1337-58679b69-b.d64 on drive A: ... done  (200)
+  [Enter=disk 3, number, or q]: 
+  Mounting fairlight-1337-58679b69-c.d64 on drive A: ... done  (200)
 $ 
 ```
