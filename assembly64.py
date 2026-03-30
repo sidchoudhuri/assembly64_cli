@@ -70,9 +70,9 @@ def field(label, value, width=14):
 
 
 def cat_label(cat_id):
-    for name, cid in CATEGORIES.items():
+    for name, cid in CAT_IDS.items():
         if cid == cat_id:
-            return name
+            return f"{cat_id} ({name})"
     return str(cat_id)
 
 
