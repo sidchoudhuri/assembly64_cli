@@ -76,23 +76,86 @@ def cat_label(cat_id):
     return str(cat_id)
 
 
-def download_file(item_id, cat, f):
+ULTIMATE_IP = None
+
+ULTIMATE_RUNNERS = {
+    ".prg": "run_prg",
+    ".crt": "run_crt",
+    ".sid": "sidplay",
+}
+
+
+def mount_disk_on_ultimate(data, filename, ip, drive="a"):
+    url = f"http://{ip}/v1/drives/{drive}:mount"
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/octet-stream",
+                 "X-Filename": filename}
+    )
+    print(f"  Mounting {filename} on drive {drive.upper()}: ...", end=" ", flush=True)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            print(f"done  ({r.status})")
+    except urllib.error.HTTPError as e:
+        print(f"FAILED: HTTP {e.code}")
+    except urllib.error.URLError as e:
+        print(f"FAILED: {e.reason}")
+
+
+def run_on_ultimate(filename, data, ip):
+    ext    = filename.lower().rsplit(".", 1)[-1]
+    runner = ULTIMATE_RUNNERS.get(f".{ext}")
+    if not runner:
+        print(f"  Ultimate: .{ext} files can't be sent directly via the REST API.")
+        print(f"  Supported types: {', '.join(ULTIMATE_RUNNERS)}")
+        print(f"  For D64/disk images, copy to a USB stick and mount from the Ultimate menu.")
+        return
+    url = f"http://{ip}/v1/runners:{runner}"
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/octet-stream",
+                 "X-Filename": filename}
+    )
+    print(f"  Sending {filename} to Ultimate at {ip} ...", end=" ", flush=True)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            print(f"done  ({r.status})")
+    except urllib.error.HTTPError as e:
+        print(f"FAILED: HTTP {e.code}")
+    except urllib.error.URLError as e:
+        print(f"FAILED: {e.reason}")
+
+
+def fetch_file_data(item_id, cat, f):
+    file_id = f.get("id")
+    url     = BASE + f"search/bin/{urllib.parse.quote(str(item_id))}/{cat}/{file_id}"
+    req     = urllib.request.Request(url, headers={"client-id": "swagger"})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return r.read()
+
+
+def download_file(item_id, cat, f, run_ip=None):
     file_id  = f.get("id")
     filename = f.get("path", f"file_{file_id}").replace("\\", "/").split("/")[-1]
-    url      = BASE + f"search/bin/{urllib.parse.quote(str(item_id))}/{cat}/{file_id}"
-    req      = urllib.request.Request(url, headers={"client-id": "swagger"})
     print(f"  Downloading {filename} ...", end=" ", flush=True)
     try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            data = r.read()
-        with open(filename, "wb") as out:
-            out.write(data)
-        print(f"done  ({len(data):,} bytes)  ->  {filename}")
+        data = fetch_file_data(item_id, cat, f)
+        print(f"done  ({len(data):,} bytes)")
+        if run_ip:
+            run_on_ultimate(filename, data, run_ip)
+        else:
+            with open(filename, "wb") as out:
+                out.write(data)
+            print(f"  Saved  ->  {filename}")
     except Exception as e:
         print(f"FAILED: {e}")
 
 
-def show_item(item, show_files=False, download=False):
+def show_item(item, show_files=False, download=False, run_ip=None):
     name     = item.get("name", "-")
     iid      = item.get("id", "")
     group    = item.get("group") or ""
@@ -117,35 +180,47 @@ def show_item(item, show_files=False, download=False):
     if compo:
         field("Compo:", f"{compo}  (place #{place})" if place else compo)
 
-    if (show_files or download) and iid:
+    if (show_files or download or run_ip) and iid:
         resp    = get(f"search/entries/{urllib.parse.quote(str(iid))}/{cat}")
         entries = resp.get("contentEntry", []) if isinstance(resp, dict) else []
         if entries:
             print()
-            if not download:
+            if not download and not run_ip:
                 print("  Files:")
                 for f in entries:
                     print(f"    [{f.get('id')}] {f.get('path','')}  ({f.get('size',0):,} bytes)")
             else:
+                disk_exts = {".d64", ".d71", ".d81", ".g64", ".g71"}
+                disks     = [f for f in entries
+                             if "." + f.get("path","").lower().rsplit(".",1)[-1] in disk_exts]
+
+                if run_ip and disks:
+                    print(f"  Note: D64/disk images can't be sent via the REST API.")
+                    print(f"  Downloading disk image(s) to current directory instead.")
+                    for f in disks:
+                        download_file(iid, cat, f, run_ip=None)
+                    return
+
                 if len(entries) == 1:
-                    download_file(iid, cat, entries[0])
+                    download_file(iid, cat, entries[0], run_ip=run_ip)
                 else:
                     print("  Files:")
                     for f in entries:
                         print(f"    {f.get('id')+1:>3}. {f.get('path','')}  ({f.get('size',0):,} bytes)")
                     print()
-                    choice = input("  Enter number to download (or Enter for all): ").strip()
+                    action = "send to Ultimate" if run_ip else "download"
+                    choice = input(f"  Enter number to {action} (or Enter for all): ").strip()
                     if choice:
                         try:
                             entries = [entries[int(choice) - 1]]
                         except (ValueError, IndexError):
-                            print("  Invalid — downloading all.")
+                            print("  Invalid — processing all.")
                     for f in entries:
-                        download_file(iid, cat, f)
+                        download_file(iid, cat, f, run_ip=run_ip)
     sep()
 
 
-def pick(items, show_files=False, download=False):
+def pick(items, show_files=False, download=False, run_ip=None):
     print(f"\n  {len(items)} result(s):\n")
     for i, item in enumerate(items, 1):
         name     = item.get("name", "-")
@@ -163,7 +238,7 @@ def pick(items, show_files=False, download=False):
     if not choice:
         return
     try:
-        show_item(items[int(choice) - 1], show_files=show_files, download=download)
+        show_item(items[int(choice) - 1], show_files=show_files, download=download, run_ip=run_ip)
     except (ValueError, IndexError):
         print("  Invalid choice.")
 
@@ -196,6 +271,7 @@ def build_query(args):
 
 
 def cmd_search(args):
+    run_ip = getattr(args, "run", None)
     has_kv_filter = any([
         args.group, args.handle, args.repo, args.cat,
         args.date, args.after, args.before
@@ -224,7 +300,7 @@ def cmd_search(args):
         if not isinstance(items, list) or not items:
             print("  No details found.")
             return
-        pick(items, show_files=args.files, download=args.download)
+        pick(items, show_files=args.files, download=args.download, run_ip=run_ip)
         return
 
     if not has_kv_filter:
@@ -237,12 +313,13 @@ def cmd_search(args):
     if not items:
         print("  No results.")
         return
-    pick(items, show_files=args.files, download=args.download)
+    pick(items, show_files=args.files, download=args.download, run_ip=run_ip)
 
 
 def cmd_sid(args):
-    enc   = urllib.parse.quote(args.query)
-    names = get(f"search/releases/{enc}/18")
+    run_ip = getattr(args, "run", None)
+    enc    = urllib.parse.quote(args.query)
+    names  = get(f"search/releases/{enc}/18")
     if not isinstance(names, list) or not names:
         print("  No results.")
         return
@@ -278,7 +355,7 @@ def cmd_sid(args):
         print("  No results after filtering.")
         return
 
-    pick(items, show_files=args.files, download=args.download)
+    pick(items, show_files=args.files, download=args.download, run_ip=run_ip)
 
 
 def cmd_categories():
@@ -327,6 +404,7 @@ def add_common(sp):
     sp.add_argument("--limit",   type=int, default=50, metavar="N", help="Max results (default: 50)")
     sp.add_argument("--files",   action="store_true", help="Show file listing")
     sp.add_argument("--download",action="store_true", help="Download files to current directory")
+    sp.add_argument("--run",     metavar="IP",    help="Send and run on Ultimate at IP address (supports: .prg .crt .sid)")
 
 
 def build_parser():
@@ -343,7 +421,6 @@ Commands:
 Name search (search/releases endpoint):
   assembly64 search "edge of disgrace"         searches CSDB demos (cat 1)
   assembly64 search "commando" --cat games     searches CSDB games (cat 0)
-  assembly64 search "commando" --cat 0         same, using category ID
   assembly64 sid sanxion                       searches HVSC (cat 18)
 
 Filter search (AQL, requires at least one --group/--handle/--repo/--cat/--date):
@@ -358,17 +435,21 @@ Filter search (AQL, requires at least one --group/--handle/--repo/--cat/--date):
   --limit    max results (default: 50)
   --files    show file listing for selected item
   --download download file(s) to current directory
+  --run IP   send and run directly on Ultimate/U64 at IP address
+             supports: .prg .crt .sid only
+             D64/disk images are not supported by the REST API —
+             copy them to USB and mount from the Ultimate menu
 
 Examples:
   assembly64 search "edge of disgrace"
   assembly64 search "edge of disgrace" --download
+  assembly64 search "edge of disgrace" --run 192.168.1.10
   assembly64 search "commando" --cat games
   assembly64 search --group fairlight --order asc
-  assembly64 search --group fairlight --after 20000101 --before 20101231
   assembly64 search --group "Booze Design" --cat demos
   assembly64 search --handle laxity --repo csdb
   assembly64 sid sanxion
-  assembly64 sid sanxion --download
+  assembly64 sid sanxion --run 192.168.1.10
   assembly64 cats
         """
     )
@@ -387,6 +468,7 @@ Examples:
     si.add_argument("--limit",    type=int, default=50, metavar="N")
     si.add_argument("--files",    action="store_true")
     si.add_argument("--download", action="store_true")
+    si.add_argument("--run",      metavar="IP", help="Send and run on Ultimate at IP address")
 
     sub.add_parser("cats", help="List all categories")
 
