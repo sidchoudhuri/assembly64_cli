@@ -16,7 +16,7 @@ cp assembly64.py ~/.local/bin/assembly64
 ```
 
 ## Usage
-```bash
+```
 $ ./assembly64.py 
 usage: assembly64 [-h] {search,sid,cats} ...
 
@@ -68,7 +68,7 @@ Examples:
   assembly64 cats
 ```
 ## Example: looking up the first 50 demos from Fairlight in descending order (newest first)
-```bash
+```
 $ ./assembly64.py search --group fairlight --cat demos --order desc
 
   50 result(s):
@@ -136,4 +136,33 @@ $ ./assembly64.py search --group fairlight --cat demos --order desc
   Released:      2026-02-13
 --------------------------------------------------------------
 $
+```
+## Example: downloading Qdor Qdor, the demo we found in the prevous example
+```
+$ ./assembly64.py search "qdor qdor" --download
+
+  1 match(es):
+
+    1. Qdor Qdor
+
+  Enter number to get details (or Enter to quit): 1
+
+  1 result(s):
+
+    1. Qdor Qdor  [Fairlight  2026-02-13  1]
+
+  Enter number to view details (or Enter to quit): 1
+--------------------------------------------------------------
+  Qdor Qdor
+--------------------------------------------------------------
+  ID:            259366
+  Category:      1
+  Group:         Fairlight
+  Handle:        hedning,Pal,redcrab,bepp,SkY,Norrland,Radiant,Pernod,Soya,Pitcher,Pantaloon,Stein Pedersen,Archmage,Frost,papademos,El Jefe,Trap,Trasher,Wix,Danko,Epsilon,tNG,Pastoelio,Bacchus,Trident,Qdor
+  Year:          2026
+  Released:      2026-02-13
+
+  Downloading qdor-qdor-75db9b39.d64 ... done  (174,848 bytes)  ->  qdor-qdor-75db9b39.d64
+--------------------------------------------------------------
+$ 
 ```
