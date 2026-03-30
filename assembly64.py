@@ -202,7 +202,7 @@ def cmd_search(args):
     ])
 
     if args.name and not has_kv_filter:
-        enc   = urllib.parse.quote(args.name)
+        enc   = urllib.parse.quote(args.name.replace(" ", ""))
         cat   = resolve_cat(args.cat) if args.cat else 1
         names = get(f"search/releases/{enc}/{cat}")
         if not isinstance(names, list) or not names:
