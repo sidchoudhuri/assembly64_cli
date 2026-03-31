@@ -7,7 +7,7 @@ We inject ```LOAD"*",8,1\rRUN\r``` in PETSCII:
 31 0D 52 55 4E 0D              = 1\rRUN\r
 ```
 This is 16 bytes which is too long for the 10-byte buffer. So we have to split it into two chunks:
-Chunk 1 (10 bytes):
+Chunk 1 (10 bytes), and Chunk 2 (6 bytes):
 ```
 PUT /v1/machine:writemem?address=0277&data=4C4F4144222A222C382C
 PUT /v1/machine:writemem?address=00C6&data=0A   ← count = 10
