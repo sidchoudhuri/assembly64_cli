@@ -248,7 +248,10 @@ def mount_and_run(ip, filename, data, drive="a"):
     time.sleep(3)
     print('  Injecting LOAD"*",8,1 + RUN ...')
     inject_keyboard(ip, 'LOAD"*",8,1\rRUN\r')
+    import time as _time
+    _t = _time.time()
     wait_for_load(ip)
+    print(f"  Load detection took {_time.time()-_t:.1f}s")
     return True
 
 
@@ -402,8 +405,6 @@ def show_metadata(item):
 def run_autodisk(ip, disk_cache, flipinfo):
     """Mount and run disk 0, then auto-flip through remaining disks using flipinfo timings."""
     import time, threading
-
-    # Build ordered list matching flipinfo diskNames to disk_cache
     cache_map = {fn.lower(): (fn, data) for fn, data in disk_cache}
     ordered   = []
     for entry in flipinfo:
@@ -419,36 +420,39 @@ def run_autodisk(ip, disk_cache, flipinfo):
 
     import select, sys
 
-    stop = threading.Event()
-
-    def check_quit():
-        """Non-blocking stdin check — returns True if user typed q."""
+    def check_input():
+        """Non-blocking stdin check.
+        Returns 'quit' if user typed q, 'flip' if user pressed Enter, None otherwise."""
         if select.select([sys.stdin], [], [], 0)[0]:
-            line = sys.stdin.readline()
-            if line.strip().lower() == "q":
-                return True
-        return False
+            line = sys.stdin.readline().strip().lower()
+            if line == "q":
+                return "quit"
+            return "flip"
+        return None
 
-    print("\n  Press q+Enter at any time to stop auto-flip.")
+    print("\n  Press Enter to flip immediately, q+Enter to stop.")
 
     for i, (fn, data, duration) in enumerate(ordered[1:], 1):
+        flipped = False
         for remaining in range(duration, 0, -1):
-            if stop.is_set():
-                break
             m, s = divmod(remaining, 60)
             print(f"\r  Auto-flip: disk {i+1} ({fn}) in {m}m {s:02d}s ...", end="", flush=True)
             time.sleep(1)
-            if check_quit():
-                stop.set()
+            action = check_input()
+            if action == "quit":
+                print()
+                print("  Auto-flip stopped.")
+                return
+            if action == "flip":
+                flipped = True
                 break
 
         print()
-        if stop.is_set():
-            print("  Auto-flip stopped.")
-            return
-
         if data:
-            print(f"  Flipping to disk {i+1}: {fn}")
+            if flipped:
+                print(f"  Manual flip to disk {i+1}: {fn}")
+            else:
+                print(f"  Auto-flip to disk {i+1}: {fn}")
             mount_disk(ip, fn, data)
         else:
             print(f"  Disk {i+1} data missing, skipping.")
@@ -1005,7 +1009,8 @@ Supported file types for --run:
 Multi-disk releases:
   Disks are downloaded upfront. You're prompted to flip manually,
   or use auto disk flip (if flip info available) which counts down
-  and mounts the next disk automatically. Press q+Enter to stop.
+  and mounts the next disk automatically.
+  During auto-flip: Enter=flip now, q+Enter=stop sequence
 
 Flags (bypass the interactive prompt):
   --download         download immediately without prompting
