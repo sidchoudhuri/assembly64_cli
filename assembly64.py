@@ -913,21 +913,55 @@ def cmd_presets(args):
         print(f"\n  Use:  assembly64 presets \"<type>\"")
 
 
-def cmd_categories():
+def cmd_categories(args):
+    run_ip   = getattr(args, "run", None)
+    download = getattr(args, "download", False)
     data = get("search/categories")
     if not isinstance(data, list):
         print("  Could not fetch categories.")
         return
-    header("CATEGORIES")
+
+    # Group by type
     by_type = {}
     for c in data:
         by_type.setdefault(c.get("type", "other"), []).append(c)
-    for t, cats in sorted(by_type.items()):
-        print(f"  {t}:")
-        for c in sorted(cats, key=lambda x: x["id"]):
-            print(f"    {c['id']:>3}  {c['description']}  ({c['name']})")
-        print()
+    type_names = sorted(by_type.keys())
+
+    # Show types
+    header("CATEGORIES")
+    for i, t in enumerate(type_names, 1):
+        print(f"  {i:>3}. {t}  ({len(by_type[t])} categories)")
     sep()
+    print()
+    choice = input("  Enter number to browse category type (or Enter to quit): ").strip()
+    if not choice:
+        return
+    try:
+        chosen_type = type_names[int(choice) - 1]
+    except (ValueError, IndexError):
+        print("  Invalid choice.")
+        return
+
+    # Show categories in that type
+    cats = sorted(by_type[chosen_type], key=lambda x: x["id"])
+    header(f"  {chosen_type}")
+    rows = [f"  {i:>3}. [{c['id']:>3}]  {c['description']}  ({c['name']})"
+            for i, c in enumerate(cats, 1)]
+    idx = paginated_list(rows, "Enter number to search this category")
+    if idx is None:
+        return
+
+    chosen_cat = cats[idx]
+    cat_id     = chosen_cat["id"]
+    cat_name   = chosen_cat["description"]
+
+    # Search within this category using AQL
+    print(f"\n  Searching {cat_name} ...", flush=True)
+    items = aql(f"category:{chosen_cat['name']}", limit=50)
+    if not items:
+        print("  No results.")
+        return
+    pick(items, run_ip=run_ip, download=download)
 
 
 def cmd_reset(args):
@@ -944,6 +978,25 @@ def cmd_reset(args):
         print(f"done  ({status})")
     except Exception as e:
         print(f"FAILED: {e}")
+
+
+def cmd_reboot(args):
+    cfg = load_config()
+    ip  = args.ip or cfg.get("ultimate_ip", "")
+    if not ip:
+        ip = input("  Ultimate IP address: ").strip()
+        if not ip:
+            print("  No IP given.")
+            return
+    print(f"  Rebooting C64 at {ip} ...", end=" ", flush=True)
+    try:
+        status = ultimate_put(ip, "machine:reboot")
+        print(f"done  ({status})")
+    except Exception as e:
+        print(f"FAILED: {e}")
+
+
+def cmd_config(args):
     cfg = load_config()
     if args.set_ip:
         cfg["ultimate_ip"] = args.set_ip
@@ -991,6 +1044,7 @@ Commands:
   presets [type]   Browse AQL query presets
   cats             List all categories
   reset            Reset the C64 (uses saved IP or prompts)
+  reboot           Reboot the C64 (reinitialises cartridge + reset)
   config           Show/set saved config
 
 After selecting any item you'll be prompted to:
@@ -1078,10 +1132,15 @@ Examples:
     pr = sub.add_parser("presets", help="Browse AQL query presets")
     pr.add_argument("name", nargs="?", metavar="TYPE")
 
-    sub.add_parser("cats", help="List all categories")
+    ca = sub.add_parser("cats", help="Browse categories")
+    ca.add_argument("--download", action="store_true")
+    ca.add_argument("--run",      metavar="IP")
 
     rst = sub.add_parser("reset", help="Reset the C64")
     rst.add_argument("--ip", metavar="IP", help="Ultimate IP (uses saved default if not given)")
+
+    rbt = sub.add_parser("reboot", help="Reboot the C64 (reinitialises cartridge + reset)")
+    rbt.add_argument("--ip", metavar="IP", help="Ultimate IP (uses saved default if not given)")
 
     cfg = sub.add_parser("config", help="Show or set saved configuration")
     cfg.add_argument("--set-ip", metavar="IP", help="Save default Ultimate IP address")
@@ -1106,9 +1165,11 @@ def main():
     elif args.cmd == "presets":
         cmd_presets(args)
     elif args.cmd == "cats":
-        cmd_categories()
+        cmd_categories(args)
     elif args.cmd == "reset":
         cmd_reset(args)
+    elif args.cmd == "reboot":
+        cmd_reboot(args)
     elif args.cmd == "config":
         cmd_config(args)
 
