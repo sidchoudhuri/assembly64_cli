@@ -2,8 +2,8 @@
 1. automatic disk change for multi-disk demos via flipdisk.txt
 2. multiple Ultimate devices
 3. favorites
+### [Code notes](code_notes.md)
 ---
-
 # assembly64_cli
 A command-line C64 scene lookup tool powered by the [Assembly64 API](https://hackerswithstyle.se/leet/swagger-ui).
 
