@@ -158,19 +158,85 @@ def inject_keyboard(ip, text):
         if i + chunk_size < len(petscii):
             time.sleep(1)
 
+def wait_for_load(ip, timeout=90, stable_count=4, poll_interval=0.5):
+    """
+    Poll $2D/$2E until:
+    1. Value changes away from the initial BASIC value (load has started)
+    2. Value stabilises (same value N times in a row — load is done)
+    Returns True when stable, False if timeout reached.
+    """
+    import time
+
+    # Read initial value (BASIC prompt state)
+    initial_val = None
+    try:
+        url = f"http://{ip}/v1/machine:readmem?address=002D&length=2"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=5) as r:
+            initial_val = r.read()
+    except Exception:
+        pass
+
+    last_val = initial_val
+    stable   = 0
+    waited   = 0
+    loading  = False  # have we seen the value change yet?
+
+    print("  Waiting for load to complete ...", end="", flush=True)
+    while waited < timeout:
+        try:
+            url = f"http://{ip}/v1/machine:readmem?address=002D&length=2"
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=5) as r:
+                val = r.read()
+
+            if not loading:
+                # Waiting for value to change from initial BASIC state
+                if val != initial_val:
+                    loading  = True
+                    last_val = val
+                    stable   = 1
+            else:
+                # Loading started — wait for value to stabilise
+                if val == last_val:
+                    stable += 1
+                    if stable >= stable_count:
+                        print(f" done  ({val.hex()})")
+                        return True
+                else:
+                    stable   = 1
+                    last_val = val
+        except Exception:
+            pass
+        time.sleep(poll_interval)
+        waited += poll_interval
+
+    print(" timed out")
+    return False
+
+
 def mount_and_run(ip, filename, data, drive="a"):
-    """Mount a disk image, reset the machine, then inject LOAD"*",8,1 + RUN."""
+    """Upload and mount a disk image, reset, inject LOAD+RUN, wait for load to complete."""
     import time
     ext    = "." + filename.lower().rsplit(".", 1)[-1]
     dtype  = DISK_TYPES.get(ext, "d64")
     params = {"type": dtype, "mode": "unlinked"}
-    print(f"  Mounting {filename} on drive {drive.upper()}: ...", end=" ", flush=True)
+    print(f"  Uploading and mounting {filename} ...", end=" ", flush=True)
     try:
-        status = ultimate_post(ip, f"drives/{drive}:mount", data, params)
-        print(f"done  ({status})")
+        qs  = "?" + urllib.parse.urlencode(params)
+        url = f"http://{ip}/v1/drives/{drive}:mount{qs}"
+        req = urllib.request.Request(
+            url, data=data, method="POST",
+            headers={"Content-Type": "application/octet-stream"}
+        )
+        with urllib.request.urlopen(req, timeout=30) as r:
+            resp = json.loads(r.read().decode("utf-8"))
+        temp_path = resp.get("file", "")
+        print(f"done  -> {temp_path}")
     except Exception as e:
         print(f"FAILED: {e}")
         return False
+
     print(f"  Resetting machine ...", end=" ", flush=True)
     try:
         ultimate_put(ip, "machine:reset")
@@ -178,11 +244,11 @@ def mount_and_run(ip, filename, data, drive="a"):
     except Exception as e:
         print(f"FAILED: {e}")
         return False
-    print("  Waiting for BASIC prompt ...", end=" ", flush=True)
+
     time.sleep(3)
-    print("done")
     print('  Injecting LOAD"*",8,1 + RUN ...')
     inject_keyboard(ip, 'LOAD"*",8,1\rRUN\r')
+    wait_for_load(ip)
     return True
 
 
@@ -248,21 +314,37 @@ def download_file(item_id, cat, f, run_ip=None):
     except Exception as e:
         print(f"FAILED: {e}")
 
+# ---------- Flip info ---------------------------------------------------------
+
+def get_flipinfo(item_id, category):
+    """Fetch flip disk info for a release. Returns ordered list of flipinfo entries or []."""
+    data = get("metadata/flipinfo")
+    if not isinstance(data, list):
+        return []
+    return [e for e in data
+            if str(e.get("id","")) == str(item_id) and e.get("category") == category]
+
+
 # ---------- Action prompt -----------------------------------------------------
 
-def action_prompt(run_ip):
-    """Ask user what to do: run, download, or quit. Returns ('run', ip), ('download',), or None."""
+def action_prompt(run_ip, flipinfo=None):
+    """Ask user what to do. Returns ('run', ip), ('autodisk', ip), ('download',), or None."""
     cfg = load_config()
-    saved_ip = cfg.get("ultimate_ip", "")
+    saved_ip     = cfg.get("ultimate_ip", "")
     effective_ip = run_ip or saved_ip
+    has_flip     = bool(flipinfo)
 
     options = []
     if effective_ip:
-        options.append(("run", f"Run on Ultimate ({effective_ip})"))
+        options.append(("run",      f"Run on Ultimate ({effective_ip})"))
+        if has_flip:
+            options.append(("autodisk", f"Run with auto disk flip ({effective_ip})"))
     else:
-        options.append(("run", "Run on Ultimate (you'll be asked for IP)"))
+        options.append(("run",      "Run on Ultimate (you'll be asked for IP)"))
+        if has_flip:
+            options.append(("autodisk", "Run with auto disk flip (you'll be asked for IP)"))
     options.append(("download", "Download to current directory"))
-    options.append(("quit", "Quit"))
+    options.append(("quit",     "Quit"))
 
     print()
     for i, (_, label) in enumerate(options, 1):
@@ -277,7 +359,7 @@ def action_prompt(run_ip):
             return None
         if key == "download":
             return ("download",)
-        if key == "run":
+        if key in ("run", "autodisk"):
             ip = effective_ip
             if not ip:
                 ip = input("  Ultimate IP address (or Enter to download instead): ").strip()
@@ -288,7 +370,7 @@ def action_prompt(run_ip):
                 if save == "y":
                     cfg["ultimate_ip"] = ip
                     save_config(cfg)
-            return ("run", ip)
+            return (key, ip)
     except (ValueError, IndexError):
         print("  Invalid choice.")
     return None
@@ -316,7 +398,65 @@ def show_metadata(item):
             field("Screenshot:", first)
 
 
-def handle_files(iid, cat, entries, run_ip, download):
+
+def run_autodisk(ip, disk_cache, flipinfo):
+    """Mount and run disk 0, then auto-flip through remaining disks using flipinfo timings."""
+    import time, threading
+
+    # Build ordered list matching flipinfo diskNames to disk_cache
+    cache_map = {fn.lower(): (fn, data) for fn, data in disk_cache}
+    ordered   = []
+    for entry in flipinfo:
+        dn = entry.get("diskName", "").lower()
+        if dn in cache_map:
+            ordered.append((cache_map[dn][0], cache_map[dn][1], entry.get("length", 0)))
+    if not ordered:
+        ordered = [(fn, data, 0) for fn, data in disk_cache]
+
+    fn, data, duration = ordered[0]
+    if not mount_and_run(ip, fn, data):
+        return
+
+    import select, sys
+
+    stop = threading.Event()
+
+    def check_quit():
+        """Non-blocking stdin check — returns True if user typed q."""
+        if select.select([sys.stdin], [], [], 0)[0]:
+            line = sys.stdin.readline()
+            if line.strip().lower() == "q":
+                return True
+        return False
+
+    print("\n  Press q+Enter at any time to stop auto-flip.")
+
+    for i, (fn, data, duration) in enumerate(ordered[1:], 1):
+        for remaining in range(duration, 0, -1):
+            if stop.is_set():
+                break
+            m, s = divmod(remaining, 60)
+            print(f"\r  Auto-flip: disk {i+1} ({fn}) in {m}m {s:02d}s ...", end="", flush=True)
+            time.sleep(1)
+            if check_quit():
+                stop.set()
+                break
+
+        print()
+        if stop.is_set():
+            print("  Auto-flip stopped.")
+            return
+
+        if data:
+            print(f"  Flipping to disk {i+1}: {fn}")
+            mount_disk(ip, fn, data)
+        else:
+            print(f"  Disk {i+1} data missing, skipping.")
+
+    print("\n  All disks played.")
+
+
+def handle_files(iid, cat, entries, run_ip, download, flipinfo=None):
     """Handle file listing, download, or run for a set of entries."""
     disk_exts = set(DISK_TYPES.keys())
     disks     = [f for f in entries
@@ -341,29 +481,32 @@ def handle_files(iid, cat, entries, run_ip, download):
                 disk_cache.append((fn, None))
 
         if disk_cache and disk_cache[0][1]:
-            fn, data = disk_cache[0]
-            if mount_and_run(run_ip, fn, data):
-                print()
-                print("  Press Enter when the demo asks for the next disk,")
-                print("  type a disk number to mount a specific one, or q to quit.")
-                disk_idx = 1
-                while disk_idx < len(disk_cache):
-                    prompt = input(f"  [Enter=disk {disk_idx+1}, number, or q]: ").strip()
-                    if prompt.lower() == "q":
-                        break
-                    if prompt.isdigit():
-                        idx = int(prompt) - 1
-                        if 0 <= idx < len(disk_cache):
-                            disk_idx = idx
+            if flipinfo:
+                run_autodisk(run_ip, disk_cache, flipinfo)
+            else:
+                fn, data = disk_cache[0]
+                if mount_and_run(run_ip, fn, data):
+                    print()
+                    print("  Press Enter when the demo asks for the next disk,")
+                    print("  type a disk number to mount a specific one, or q to quit.")
+                    disk_idx = 1
+                    while disk_idx < len(disk_cache):
+                        prompt = input(f"  [Enter=disk {disk_idx+1}, number, or q]: ").strip()
+                        if prompt.lower() == "q":
+                            break
+                        if prompt.isdigit():
+                            idx = int(prompt) - 1
+                            if 0 <= idx < len(disk_cache):
+                                disk_idx = idx
+                            else:
+                                print(f"  Invalid — valid range 1-{len(disk_cache)}")
+                                continue
+                        fn, data = disk_cache[disk_idx]
+                        if data:
+                            mount_disk(run_ip, fn, data)
                         else:
-                            print(f"  Invalid — valid range 1-{len(disk_cache)}")
-                            continue
-                    fn, data = disk_cache[disk_idx]
-                    if data:
-                        mount_disk(run_ip, fn, data)
-                    else:
-                        print(f"  Disk {disk_idx+1} failed to download, skipping.")
-                    disk_idx += 1
+                            print(f"  Disk {disk_idx+1} failed to download, skipping.")
+                        disk_idx += 1
         return
 
     if len(entries) == 1:
@@ -384,7 +527,7 @@ def handle_files(iid, cat, entries, run_ip, download):
             download_file(iid, cat, f, run_ip=run_ip)
 
 
-def show_item(item, run_ip=None, download=False, show_files=False):
+def show_item(item, run_ip=None, download=False, show_files=False, autodisk=False):
     name     = item.get("name", "-")
     iid      = item.get("id", "")
     group    = item.get("group") or ""
@@ -422,6 +565,14 @@ def show_item(item, run_ip=None, download=False, show_files=False):
     if not entries:
         return
 
+    # Fetch flipinfo if this is a multi-disk release
+    disk_exts = set(DISK_TYPES.keys())
+    disks     = [f for f in entries
+                 if "." + f.get("path","").lower().rsplit(".",1)[-1] in disk_exts]
+    flipinfo  = get_flipinfo(iid, cat) if len(disks) > 1 else []
+    if flipinfo:
+        print(f"\n  Flip info available — {len(flipinfo)} disks with auto-flip timings.")
+
     if show_files and not download and not run_ip:
         print("\n  Files:")
         for i, f in enumerate(entries, 1):
@@ -433,7 +584,8 @@ def show_item(item, run_ip=None, download=False, show_files=False):
         return
 
     if run_ip:
-        handle_files(iid, cat, entries, run_ip=run_ip, download=False)
+        fi = flipinfo if autodisk else None
+        handle_files(iid, cat, entries, run_ip=run_ip, download=False, flipinfo=fi)
         return
 
     # Interactive action prompt
@@ -441,12 +593,13 @@ def show_item(item, run_ip=None, download=False, show_files=False):
     for i, f in enumerate(entries, 1):
         print(f"    {i:>3}. {f.get('path','')}  ({f.get('size',0):,} bytes)")
 
-    action = action_prompt(run_ip=None)
+    action = action_prompt(run_ip=None, flipinfo=flipinfo)
     if action is None:
         return
-    if action[0] == "run":
+    if action[0] in ("run", "autodisk"):
         ip = action[1]
-        handle_files(iid, cat, entries, run_ip=ip, download=False)
+        fi = flipinfo if action[0] == "autodisk" else None
+        handle_files(iid, cat, entries, run_ip=ip, download=False, flipinfo=fi)
     elif action[0] == "download":
         if len(entries) == 1:
             download_file(iid, cat, entries[0])
@@ -553,7 +706,7 @@ def paginated_list(rows, prompt):
             print("  Invalid — enter a number, n/→, p/←, or q")
 
 
-def pick(items, run_ip=None, download=False, show_files=False):
+def pick(items, run_ip=None, download=False, show_files=False, autodisk=False):
     print(f"\n  {len(items)} result(s):\n")
     rows = []
     for i, item in enumerate(items, 1):
@@ -570,7 +723,7 @@ def pick(items, run_ip=None, download=False, show_files=False):
     idx = paginated_list(rows, "Enter number to view details")
     if idx is None:
         return
-    show_item(items[idx], run_ip=run_ip, download=download, show_files=show_files)
+    show_item(items[idx], run_ip=run_ip, download=download, show_files=show_files, autodisk=autodisk)
 
 
 def pick_name(names, prompt="select"):
@@ -629,7 +782,7 @@ def cmd_search(args):
         if not isinstance(items, list) or not items:
             print("  No details found.")
             return
-        pick(items, run_ip=run_ip, download=download, show_files=args.files)
+        pick(items, run_ip=run_ip, download=download, show_files=args.files, autodisk=getattr(args, "autodisk", False))
         return
 
     if not has_kv:
@@ -640,7 +793,7 @@ def cmd_search(args):
     if not items:
         print("  No results.")
         return
-    pick(items, run_ip=run_ip, download=download, show_files=args.files)
+    pick(items, run_ip=run_ip, download=download, show_files=args.files, autodisk=getattr(args, "autodisk", False))
 
 
 def cmd_sid(args):
@@ -673,7 +826,7 @@ def cmd_sid(args):
         print("  No results after filtering.")
         return
 
-    pick(items, run_ip=run_ip, download=download, show_files=args.files)
+    pick(items, run_ip=run_ip, download=download, show_files=args.files, autodisk=getattr(args, "autodisk", False))
 
 
 def cmd_charts(args):
@@ -818,6 +971,7 @@ def add_common(sp):
     sp.add_argument("--files",   action="store_true", help="Show file listing only")
     sp.add_argument("--download",action="store_true", help="Download without prompting")
     sp.add_argument("--run",     metavar="IP",    help="Run on Ultimate at IP without prompting")
+    sp.add_argument("--autodisk", action="store_true", help="Auto-flip disks using Assembly64 flip timings (--run required)")
 
 
 def build_parser():
@@ -833,20 +987,38 @@ Commands:
   presets [type]   Browse AQL query presets
   cats             List all categories
   reset            Reset the C64 (uses saved IP or prompts)
-  config           Show/set saved config (e.g. default Ultimate IP)
+  config           Show/set saved config
 
 After selecting any item you'll be prompted to:
-  Run on Ultimate  — sends file to your C64 via REST API
-  Download         — saves to current directory
+  Run on Ultimate          — sends file to your C64 via REST API
+  Run with auto disk flip  — auto-mounts disks using Assembly64 flip timings
+                             (only shown when flip info is available)
+  Download                 — saves to current directory
   Quit
 
-Flags bypass the prompt:
-  --download   download immediately
-  --run IP     run on Ultimate immediately
-  --files      show file list only, no action
+Supported file types for --run:
+  .prg / .crt   DMA load and run
+  .sid          SID player
+  .d64 / .g64 / .d71 / .g71 / .d81
+                mount on drive A, reset, inject LOAD"*",8,1 + RUN
+
+Multi-disk releases:
+  Disks are downloaded upfront. You're prompted to flip manually,
+  or use auto disk flip (if flip info available) which counts down
+  and mounts the next disk automatically. Press q+Enter to stop.
+
+Flags (bypass the interactive prompt):
+  --download         download immediately without prompting
+  --run IP           run on Ultimate at IP without prompting
+  --autodisk         use auto disk flip timing (requires --run)
+  --files            show file listing only, no action
+  --limit N          max AQL results (default 50)
+
+Pagination: n/→ next page, p/← prev page, q/Enter to quit
 
 Save your Ultimate IP so you don't have to type it every time:
-  assembly64 config --set-ip 192.168.1.10
+  assembly64 config --set-ip 192.168.2.32
+  assembly64 config --show
 
 Name search (uses search/releases):
   assembly64 search "edge of disgrace"         CSDB demos (default)
@@ -860,16 +1032,19 @@ AQL filter search (needs at least one of --group/--handle/--repo/--cat/--date):
   --cat      {', '.join(CATEGORIES)}
   --date / --after / --before   YYYYMMDD
   --order    asc or desc
-  --limit    max results (default 50)
 
 Examples:
   assembly64 search "edge of disgrace"
+  assembly64 search "edge of disgrace" --run 192.168.2.32
+  assembly64 search "edge of disgrace" --run 192.168.2.32 --autodisk
   assembly64 search --group fairlight --cat demos --order asc
   assembly64 search --group "Booze Design" --after 20000101
   assembly64 search --handle laxity --repo csdb
   assembly64 sid sanxion
   assembly64 charts
+  assembly64 charts "Top Demos"
   assembly64 presets
+  assembly64 reset
   assembly64 config --set-ip 192.168.2.32
         """
     )
