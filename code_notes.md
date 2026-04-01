@@ -57,8 +57,8 @@ When you use ```./assembly64.py run .``` in a directory, it looks for a flip fil
 If flip info is available from the API, a ```{item_id}-flip-info.txt``` is written alongside the downloaded files so run . works offline later.
 ### File priority
 The ```find_flip_file``` function has a file priority order of 
-1. ```flip-info.txt```, ```flipinfo.txt```, ```flip_info.txt``` (legacy Assembly64 format)
-2. ```*-flip-info.txt```, ```*_flip_info.txt``` (numbered files generated upon download eg 72550-flip-info.txt)
+1. ```*-flip-info.txt```, ```*_flip_info.txt``` (numbered files generated upon download via Assembly64 API eg 72550-flip-info.txt)
+2. ```flip-info.txt```, ```flipinfo.txt```, ```flip_info.txt``` (legacy format)
 3 ```.lst``` (Pi1541 swap list)
 4. ```.vfl``` (VICE fliplist)
 1 and 2 are ```preferred```, then ```.lst``` and ```.vfl```. First item in preferred wins, falling back to others if none found.
