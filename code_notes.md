@@ -34,7 +34,7 @@ The C64 sees ```LOAD"*",8,1``` followed by Return. After this executes. It retur
 The C64 needs to be at a clean BASIC prompt before injecting. If something else is running, the keyboard buffer won't be processed. The reset guarantees a known state.
 The writemem endpoint writes directly to C64 RAM via DMA over the cartridge bus, bypassing the CPU, so it works even while the C64 is busy doing something else.
 ## Flip Disk
-When you search and select a multi-disk demo, GET /metadata/flipinfo is called from the Assembly64 API and filters by item ID. This returns a list of disk filenames with their play durations in seconds, eg
+When you search and select a multi-disk demo, ```GET /metadata/flipinfo``` is called from the Assembly64 API and filters by item ID. This returns a list of disk filenames with their play durations in seconds, eg
 ```
 image1.d64 → 315s
 image2.d64 → 308s
@@ -42,16 +42,23 @@ image3.d64 → 374s
 image4.d64 → 158s
 ```
 The length value means "this disk plays for N seconds before the next one is to be mounted"
-Running
+### Running
 1. All disks are downloaded into memory
 2. Disk 1 is uploaded to the Ultimate's /Temp/ folder and mounted
 3. The C64 resets, BASIC boots, keyboard buffer is injected with ```LOAD"*",8,1``` then ```RUN```
 4. wait_for_load polls $2D/$2E via DMA every 0.5 seconds — waits for it to change away from the BASIC reset value, then waits for it to stabilise — meaning the demo is fully loaded and running
 5. Countdown starts from disk 1's length value (315s), updating the same line every second
 6. This continues, using each disk's run time, mounting the next disk when it hits zero until there is nothing to flip to
-Manual override
+### Manual override
 At any point during the countdown, pressing Enter flips immediately. Pressing q+Enter stops the whole sequence.
 Local files
-When you use ./assembly64.py run . in a directory, it looks for a flip file (232976-flip-info.txt, flip-info.txt, .lst, .vfl) and uses that for ordering and timing. Same logic, same countdown.
-On download
-If flip info is available from the API, a {item_id}-flip-info.txt is written alongside the downloaded files so run . works offline later.
+When you use ```./assembly64.py run .``` in a directory, it looks for a flip file (232976-flip-info.txt, flip-info.txt, .lst, .vfl) and uses that for ordering and timing. Same logic, same countdown.
+### On download
+If flip info is available from the API, a ```{item_id}-flip-info.txt``` is written alongside the downloaded files so run . works offline later.
+### File priority
+The ```find_flip_file``` function has a file priority order of 
+1. ```flip-info.txt```, ```flipinfo.txt```, ```flip_info.txt``` (legacy Assembly64 format)
+2. ```*-flip-info.txt```, ```*_flip_info.txt``` (numbered files generated upon download eg 72550-flip-info.txt)
+3 ```.lst``` (Pi1541 swap list)
+4. ```.vfl``` (VICE fliplist)
+1 and 2 are ```preferred```, then ```.lst``` and ```.vfl```. First item in preferred wins, falling back to others if none found.
