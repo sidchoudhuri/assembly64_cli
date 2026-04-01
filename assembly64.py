@@ -162,7 +162,7 @@ def wait_for_load(ip, timeout=90, stable_count=4, poll_interval=0.5):
     """
     Poll $2D/$2E until:
     1. Value changes away from the initial BASIC value (load has started)
-    2. Value stabilises (same value N times in a row — load is done)
+    2. Value stabilises (same value N times in a row -- load is done)
     Returns True when stable, False if timeout reached.
     """
     import time
@@ -197,7 +197,7 @@ def wait_for_load(ip, timeout=90, stable_count=4, poll_interval=0.5):
                     last_val = val
                     stable   = 1
             else:
-                # Loading started — wait for value to stabilise
+                # Loading started -- wait for value to stabilise
                 if val == last_val:
                     stable += 1
                     if stable >= stable_count:
@@ -394,7 +394,7 @@ def action_prompt(run_ip, flipinfo=None):
             if not ip:
                 ip = input("  Ultimate IP address (or Enter to download instead): ").strip()
                 if not ip:
-                    print("  No IP given — downloading instead.")
+                    print("  No IP given -- downloading instead.")
                     return ("download",)
                 save = input(f"  Save {ip} as default? [y/N]: ").strip().lower()
                 if save == "y":
@@ -473,7 +473,7 @@ def run_autodisk(ip, disk_cache, flipinfo):
         _, _, duration        = ordered[i]
 
         if duration == 0:
-            print(f"\n  No timing for disk {i+2} ({fn_next}) — mounting now.")
+            print(f"\n  No timing for disk {i+2} ({fn_next}) -- mounting now.")
             mount_disk(ip, fn_next, data_next)
             continue
 
@@ -549,7 +549,7 @@ def handle_files(iid, cat, entries, run_ip, download, flipinfo=None, item_name=N
                  if "." + f.get("path","").lower().rsplit(".",1)[-1] in disk_exts]
 
     if run_ip and len(disks) > 1:
-        print(f"\n  Multi-disk release — {len(disks)} disk image(s):")
+        print(f"\n  Multi-disk release -- {len(disks)} disk image(s):")
         for i, f in enumerate(disks, 1):
             print(f"    {i}. {f.get('path','')}  ({f.get('size',0):,} bytes)")
         print()
@@ -585,7 +585,7 @@ def handle_files(iid, cat, entries, run_ip, download, flipinfo=None, item_name=N
                             if 0 <= idx < len(disk_cache):
                                 disk_idx = idx
                             else:
-                                print(f"  Invalid — valid range 1-{len(disk_cache)}")
+                                print(f"  Invalid -- valid range 1-{len(disk_cache)}")
                                 continue
                         fn, data = disk_cache[disk_idx]
                         if data:
@@ -610,7 +610,7 @@ def handle_files(iid, cat, entries, run_ip, download, flipinfo=None, item_name=N
             try:
                 entries = [entries[int(choice) - 1]]
             except (ValueError, IndexError):
-                print("  Invalid — processing all.")
+                print("  Invalid -- processing all.")
         for f in entries:
             download_file(iid, cat, f, run_ip=run_ip, target_dir=target_dir)
         # Write flip-info.txt if downloading all disks for a multi-disk release
@@ -664,7 +664,7 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
                  if "." + f.get("path","").lower().rsplit(".",1)[-1] in disk_exts]
     flipinfo  = get_flipinfo(iid, cat) if len(disks) > 1 else []
     if flipinfo:
-        print(f"\n  Flip info available — {len(flipinfo)} disks with auto-flip timings.")
+        print(f"\n  Flip info available -- {len(flipinfo)} disks with auto-flip timings.")
 
     if show_files and not download and not run_ip:
         print("\n  Files:")
@@ -707,7 +707,7 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
                 try:
                     entries = [entries[int(choice) - 1]]
                 except (ValueError, IndexError):
-                    print("  Invalid — downloading all.")
+                    print("  Invalid -- downloading all.")
             for f in entries:
                 download_file(iid, cat, f, target_dir=target_dir)
             if flipinfo and len(disks) > 1 and not choice:
@@ -734,7 +734,7 @@ def read_input(prompt):
         while True:
             ch = sys.stdin.read(1)
             if ch == "\x1b":
-                # Escape sequence — read two more chars
+                # Escape sequence -- read two more chars
                 seq = sys.stdin.read(2)
                 termios.tcsetattr(fd, termios.TCSADRAIN, old)
                 sys.stdout.write("\n")
@@ -774,7 +774,7 @@ def paginated_list(rows, prompt):
     """
     Display a paginated list. rows is a list of pre-formatted strings.
     Returns the chosen 0-based index, or None.
-    Navigation: number to select, n/→ next, p/← prev, q/Enter to quit.
+    Navigation: number to select, n/-> next, p/<- prev, q/Enter to quit.
     """
     total  = len(rows)
     offset = 0
@@ -785,7 +785,7 @@ def paginated_list(rows, prompt):
         end = offset + len(page_rows)
         print()
         if end < total:
-            print(f"  Showing {offset+1}-{end} of {total}  |  n/→=next  p/←=prev  q=quit")
+            print(f"  Showing {offset+1}-{end} of {total}  |  n/->=next  p/<-=prev  q=quit")
         else:
             print(f"  Showing {offset+1}-{end} of {total}")
         print()
@@ -805,7 +805,7 @@ def paginated_list(rows, prompt):
                 return idx
             print(f"  Out of range (1-{total})")
         except ValueError:
-            print("  Invalid — enter a number, n/→, p/←, or q")
+            print("  Invalid -- enter a number, n/->, p/<-, or q")
 
 
 def pick(items, run_ip=None, download=False, show_files=False, autodisk=False):
@@ -1066,9 +1066,9 @@ def parse_flip_file(path):
     """
     Parse a flip/swap file and return ordered list of (filename, duration_seconds).
     Supports:
-      flip-info.txt  — Assembly64: filename;seconds (last entry may have no duration)
-      *.lst          — Pi1541: one filename per line, no timing
-      *.vfl          — VICE fliplist: one filename per line
+      flip-info.txt  -- Assembly64: filename;seconds (last entry may have no duration)
+      *.lst          -- Pi1541: one filename per line, no timing
+      *.vfl          -- VICE fliplist: one filename per line
     """
     entries = []
     try:
@@ -1153,7 +1153,7 @@ def cmd_run(args):
             print(f"  No supported files found in {path}")
             return
 
-        # Single PRG/SID/CRT — just run it
+        # Single PRG/SID/CRT -- just run it
         if not disks and len(prgs) == 1:
             fn, fp = prgs[0]
             with open(fp, "rb") as f:
@@ -1161,7 +1161,7 @@ def cmd_run(args):
             run_on_ultimate(fn, data, ip)
             return
 
-        # Single disk — just run it
+        # Single disk -- just run it
         if len(disks) == 1:
             fn, fp = disks[0]
             with open(fp, "rb") as f:
@@ -1169,7 +1169,7 @@ def cmd_run(args):
             run_on_ultimate(fn, data, ip)
             return
 
-        # Multiple disks — check for flip file
+        # Multiple disks -- check for flip file
         flip_path = find_flip_file(path)
         if flip_path:
             print(f"  Found flip file: {os.path.basename(flip_path)}")
@@ -1185,7 +1185,7 @@ def cmd_run(args):
                         disk_cache.append((fn, data))
                         print(f"    {fn}  ({len(data):,} bytes)  [{duration}s]")
                     else:
-                        print(f"    {fn}  NOT FOUND — skipping")
+                        print(f"    {fn}  NOT FOUND -- skipping")
 
                 # Build flipinfo-like structure from flip file
                 flipinfo = [{"diskName": fn, "length": dur}
@@ -1195,8 +1195,8 @@ def cmd_run(args):
                 run_autodisk(ip, cache_with_flip, flipinfo)
                 return
 
-        # Multiple disks, no flip file — load all and prompt
-        print(f"  {len(disks)} disk image(s) found, no flip file — manual swap mode")
+        # Multiple disks, no flip file -- load all and prompt
+        print(f"  {len(disks)} disk image(s) found, no flip file -- manual swap mode")
         disk_cache = []
         for fn, fp in disks:
             with open(fp, "rb") as f:
@@ -1219,7 +1219,7 @@ def cmd_run(args):
                     if 0 <= idx < len(disk_cache):
                         disk_idx = idx
                     else:
-                        print(f"  Invalid — valid range 1-{len(disk_cache)}")
+                        print(f"  Invalid -- valid range 1-{len(disk_cache)}")
                         continue
                 fn, data = disk_cache[disk_idx]
                 mount_disk(ip, fn, data)
@@ -1325,10 +1325,10 @@ Commands:
   config           Show/set saved config
 
 After selecting any item you'll be prompted to:
-  Run on Ultimate          — sends file to your C64 via REST API
-  Run with auto disk flip  — auto-mounts disks using Assembly64 flip timings
+  Run on Ultimate          -- sends file to your C64 via REST API
+  Run with auto disk flip  -- auto-mounts disks using Assembly64 flip timings
                              (only shown when flip info is available)
-  Download                 — saves to current directory
+  Download                 -- saves to current directory
   Quit
 
 Supported file types for --run:
@@ -1350,7 +1350,7 @@ Flags (bypass the interactive prompt):
   --files            show file listing only, no action
   --limit N          max AQL results (default 50)
 
-Pagination: n/→ next page, p/← prev page, q/Enter to quit
+Pagination: n/-> next page, p/<- prev page, q/Enter to quit
 
 Save your Ultimate IP so you don't have to type it every time:
   assembly64 config --set-ip 192.168.2.32
