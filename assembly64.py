@@ -216,7 +216,8 @@ def wait_for_load(ip, timeout=90, stable_count=4, poll_interval=0.5):
 
 
 def mount_and_run(ip, filename, data, drive="a"):
-    """Upload and mount a disk image, reset, inject LOAD+RUN, wait for load to complete."""
+    """Upload and mount a disk image, reset, inject LOAD+RUN, wait for load to complete.
+    Returns load detection time in seconds, or 0 if load detection failed."""
     import time
     ext    = "." + filename.lower().rsplit(".", 1)[-1]
     dtype  = DISK_TYPES.get(ext, "d64")
@@ -235,7 +236,7 @@ def mount_and_run(ip, filename, data, drive="a"):
         print(f"done  -> {temp_path}")
     except Exception as e:
         print(f"FAILED: {e}")
-        return False
+        return 0
 
     print(f"  Resetting machine ...", end=" ", flush=True)
     try:
@@ -243,16 +244,16 @@ def mount_and_run(ip, filename, data, drive="a"):
         print("done")
     except Exception as e:
         print(f"FAILED: {e}")
-        return False
+        return 0
 
     time.sleep(3)
     print('  Injecting LOAD"*",8,1 + RUN ...')
     inject_keyboard(ip, 'LOAD"*",8,1\rRUN\r')
-    import time as _time
-    _t = _time.time()
+    t = time.time()
     wait_for_load(ip)
-    print(f"  Load detection took {_time.time()-_t:.1f}s")
-    return True
+    load_time = time.time() - t
+    print(f"  Load detection took {load_time:.1f}s")
+    return load_time
 
 
 def mount_disk(ip, filename, data, drive="a"):
@@ -301,7 +302,32 @@ def fetch_file_data(item_id, cat, f):
     with urllib.request.urlopen(req, timeout=30) as r:
         return r.read()
 
-def download_file(item_id, cat, f, run_ip=None):
+def slugify(name):
+    """Convert a release name to a safe directory name."""
+    import re
+    name = name.lower().strip()
+    name = re.sub(r'[^\w\s-]', '', name)
+    name = re.sub(r'[\s_]+', '-', name)
+    name = re.sub(r'-+', '-', name).strip('-')
+    return name or "release"
+
+
+def prompt_download_dir(item_name, item_id):
+    """Ask user whether to download to current dir or a new folder. Returns target dir."""
+    folder = slugify(item_name)
+    print(f"\n  Download to:")
+    print(f"  [1] Current directory")
+    print(f"  [2] Create folder: {folder}/")
+    print()
+    choice = input("  Choose (or Enter for current directory): ").strip()
+    if choice == "2":
+        os.makedirs(folder, exist_ok=True)
+        print(f"  Created folder: {folder}/")
+        return folder
+    return "."
+
+
+def download_file(item_id, cat, f, run_ip=None, target_dir="."):
     file_id  = f.get("id")
     filename = f.get("path", f"file_{file_id}").replace("\\", "/").split("/")[-1]
     print(f"  Downloading {filename} ...", end=" ", flush=True)
@@ -311,9 +337,10 @@ def download_file(item_id, cat, f, run_ip=None):
         if run_ip:
             run_on_ultimate(filename, data, run_ip)
         else:
-            with open(filename, "wb") as out:
+            filepath = os.path.join(target_dir, filename)
+            with open(filepath, "wb") as out:
                 out.write(data)
-            print(f"  Saved  ->  {filename}")
+            print(f"  Saved  ->  {filepath}")
     except Exception as e:
         print(f"FAILED: {e}")
 
@@ -408,17 +435,24 @@ def run_autodisk(ip, disk_cache, flipinfo):
     cache_map = {fn.lower(): (fn, data) for fn, data in disk_cache}
     ordered   = []
     for entry in flipinfo:
-        dn = entry.get("diskName", "").lower()
+        dn = entry.get("diskName", "").replace("\\", "/").split("/")[-1].lower()
         if dn in cache_map:
             ordered.append((cache_map[dn][0], cache_map[dn][1], entry.get("length", 0)))
     if not ordered:
         ordered = [(fn, data, 0) for fn, data in disk_cache]
 
     fn, data, duration = ordered[0]
-    if not mount_and_run(ip, fn, data):
+    load_time = mount_and_run(ip, fn, data)
+    if load_time == 0 and not isinstance(load_time, float):
         return
 
-    import select, sys
+    import select, sys, termios
+
+    # Flush any pending stdin input before starting countdown
+    try:
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+    except Exception:
+        pass
 
     def check_input():
         """Non-blocking stdin check.
@@ -432,11 +466,21 @@ def run_autodisk(ip, disk_cache, flipinfo):
 
     print("\n  Press Enter to flip immediately, q+Enter to stop.")
 
-    for i, (fn, data, duration) in enumerate(ordered[1:], 1):
+    # Each disk's 'duration' is how long IT plays before the next disk is needed.
+    # So we count down disk[i]'s duration, then mount disk[i+1].
+    for i in range(len(ordered) - 1):
+        fn_next, data_next, _ = ordered[i + 1]
+        _, _, duration        = ordered[i]
+
+        if duration == 0:
+            print(f"\n  No timing for disk {i+2} ({fn_next}) — mounting now.")
+            mount_disk(ip, fn_next, data_next)
+            continue
+
         flipped = False
         for remaining in range(duration, 0, -1):
             m, s = divmod(remaining, 60)
-            print(f"\r  Auto-flip: disk {i+1} ({fn}) in {m}m {s:02d}s ...", end="", flush=True)
+            print(f"\r  Auto-flip: disk {i+2} ({fn_next}) in {m}m {s:02d}s ...", end="", flush=True)
             time.sleep(1)
             action = check_input()
             if action == "quit":
@@ -448,19 +492,57 @@ def run_autodisk(ip, disk_cache, flipinfo):
                 break
 
         print()
-        if data:
+        if data_next:
             if flipped:
-                print(f"  Manual flip to disk {i+1}: {fn}")
+                print(f"  Manual flip to disk {i+2}: {fn_next}")
             else:
-                print(f"  Auto-flip to disk {i+1}: {fn}")
-            mount_disk(ip, fn, data)
+                print(f"  Auto-flip to disk {i+2}: {fn_next}")
+            mount_disk(ip, fn_next, data_next)
+            try:
+                termios.tcflush(sys.stdin, termios.TCIFLUSH)
+            except Exception:
+                pass
         else:
-            print(f"  Disk {i+1} data missing, skipping.")
+            print(f"  Disk {i+2} data missing, skipping.")
 
     print("\n  All disks played.")
 
 
-def handle_files(iid, cat, entries, run_ip, download, flipinfo=None):
+def write_flip_file(flipinfo, disk_filenames, target_dir=".", item_id=None):
+    """Write a flip-info.txt file from API flipinfo data."""
+    flip_filename = f"{item_id}-flip-info.txt" if item_id else "flip-info.txt"
+    flip_path     = os.path.join(target_dir, flip_filename)
+
+    # Check if any flip file already exists in target dir
+    existing = find_flip_file(target_dir)
+    if existing:
+        answer = input(f"  Flip file {os.path.basename(existing)} already exists. Overwrite with API data? [y/N]: ").strip().lower()
+        if answer != "y":
+            return
+    # Build a map from bare filename to duration
+    flip_map = {}
+    for entry in flipinfo:
+        dn  = entry.get("diskName", "").replace("\\", "/").split("/")[-1]
+        dur = entry.get("length", 0)
+        flip_map[dn.lower()] = dur
+
+    lines = []
+    for fn in disk_filenames:
+        dur = flip_map.get(fn.lower(), 0)
+        if dur:
+            lines.append(f"{fn};{dur}")
+        else:
+            lines.append(fn)
+
+    try:
+        with open(flip_path, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        print(f"  Saved  ->  {flip_path}")
+    except Exception as e:
+        print(f"  Warning: could not write flip file: {e}")
+
+
+def handle_files(iid, cat, entries, run_ip, download, flipinfo=None, item_name=None, item_id=None, target_dir="."):
     """Handle file listing, download, or run for a set of entries."""
     disk_exts = set(DISK_TYPES.keys())
     disks     = [f for f in entries
@@ -514,8 +596,10 @@ def handle_files(iid, cat, entries, run_ip, download, flipinfo=None):
         return
 
     if len(entries) == 1:
-        download_file(iid, cat, entries[0], run_ip=run_ip)
+        download_file(iid, cat, entries[0], run_ip=run_ip, target_dir=target_dir)
     else:
+        if not run_ip and target_dir == ".":
+            target_dir = prompt_download_dir(item_name or "release", item_id)
         print("\n  Files:")
         for i, f in enumerate(entries, 1):
             print(f"    {i:>3}. {f.get('path','')}  ({f.get('size',0):,} bytes)")
@@ -528,7 +612,12 @@ def handle_files(iid, cat, entries, run_ip, download, flipinfo=None):
             except (ValueError, IndexError):
                 print("  Invalid — processing all.")
         for f in entries:
-            download_file(iid, cat, f, run_ip=run_ip)
+            download_file(iid, cat, f, run_ip=run_ip, target_dir=target_dir)
+        # Write flip-info.txt if downloading all disks for a multi-disk release
+        if not run_ip and flipinfo and len(disks) > 1 and not choice:
+            disk_filenames = [f.get("path","").replace("\\","/").split("/")[-1]
+                              for f in disks]
+            write_flip_file(flipinfo, disk_filenames, target_dir=target_dir, item_id=item_id)
 
 
 def show_item(item, run_ip=None, download=False, show_files=False, autodisk=False):
@@ -584,12 +673,15 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
         return
 
     if download:
-        handle_files(iid, cat, entries, run_ip=None, download=True)
+        target_dir = prompt_download_dir(name, iid) if len(entries) > 1 else "."
+        handle_files(iid, cat, entries, run_ip=None, download=True, flipinfo=flipinfo,
+                     item_name=name, item_id=iid, target_dir=target_dir)
         return
 
     if run_ip:
         fi = flipinfo if autodisk else None
-        handle_files(iid, cat, entries, run_ip=run_ip, download=False, flipinfo=fi)
+        handle_files(iid, cat, entries, run_ip=run_ip, download=False, flipinfo=fi,
+                     item_name=name, item_id=iid)
         return
 
     # Interactive action prompt
@@ -603,10 +695,12 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
     if action[0] in ("run", "autodisk"):
         ip = action[1]
         fi = flipinfo if action[0] == "autodisk" else None
-        handle_files(iid, cat, entries, run_ip=ip, download=False, flipinfo=fi)
+        handle_files(iid, cat, entries, run_ip=ip, download=False, flipinfo=fi,
+                     item_name=name, item_id=iid)
     elif action[0] == "download":
+        target_dir = prompt_download_dir(name, iid) if len(entries) > 1 else "."
         if len(entries) == 1:
-            download_file(iid, cat, entries[0])
+            download_file(iid, cat, entries[0], target_dir=target_dir)
         else:
             choice = input("\n  Enter number to download (or Enter for all): ").strip()
             if choice:
@@ -615,7 +709,11 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
                 except (ValueError, IndexError):
                     print("  Invalid — downloading all.")
             for f in entries:
-                download_file(iid, cat, f)
+                download_file(iid, cat, f, target_dir=target_dir)
+            if flipinfo and len(disks) > 1 and not choice:
+                disk_filenames = [f.get("path","").replace("\\","/").split("/")[-1]
+                                  for f in disks]
+                write_flip_file(flipinfo, disk_filenames, target_dir=target_dir, item_id=iid)
 
 # ---------- List helpers ------------------------------------------------------
 
@@ -964,7 +1062,58 @@ def cmd_categories(args):
     pick(items, run_ip=run_ip, download=download)
 
 
-def cmd_reset(args):
+def parse_flip_file(path):
+    """
+    Parse a flip/swap file and return ordered list of (filename, duration_seconds).
+    Supports:
+      flip-info.txt  — Assembly64: filename;seconds (last entry may have no duration)
+      *.lst          — Pi1541: one filename per line, no timing
+      *.vfl          — VICE fliplist: one filename per line
+    """
+    entries = []
+    try:
+        with open(path) as f:
+            lines = [l.strip() for l in f if l.strip() and not l.startswith('#')]
+        for line in lines:
+            if ";" in line:
+                parts = line.split(";", 1)
+                fname    = parts[0].strip()
+                duration = int(parts[1].strip()) if parts[1].strip().isdigit() else 0
+            else:
+                fname    = line.strip()
+                duration = 0
+            if fname:
+                entries.append((fname, duration))
+    except Exception as e:
+        print(f"  Warning: could not parse flip file {path}: {e}")
+    return entries
+
+
+def find_flip_file(directory):
+    """Look for a flip/swap file in the given directory.
+    Returns path of best match, or None. Warns if multiple found."""
+    preferred = []
+    others    = []
+    for f in os.listdir(directory):
+        fl = f.lower()
+        fp = os.path.join(directory, f)
+        if fl in ("flip-info.txt", "flipinfo.txt", "flip_info.txt") or \
+           fl.endswith("-flip-info.txt") or fl.endswith("_flip_info.txt"):
+            preferred.append(fp)
+        elif fl.endswith(".lst") or fl.endswith(".vfl"):
+            others.append(fp)
+    all_found = preferred + others
+    if not all_found:
+        return None
+    if len(all_found) > 1:
+        print(f"  Warning: multiple flip files found:")
+        for fp in all_found:
+            print(f"    {os.path.basename(fp)}")
+        print(f"  Using: {os.path.basename(all_found[0])}")
+    return all_found[0]
+
+
+def cmd_run(args):
     cfg = load_config()
     ip  = args.ip or cfg.get("ultimate_ip", "")
     if not ip:
@@ -972,15 +1121,139 @@ def cmd_reset(args):
         if not ip:
             print("  No IP given.")
             return
-    print(f"  Resetting C64 at {ip} ...", end=" ", flush=True)
-    try:
-        status = ultimate_put(ip, "machine:reset")
-        print(f"done  ({status})")
-    except Exception as e:
-        print(f"FAILED: {e}")
+
+    path = args.path
+    disk_exts = set(DISK_TYPES.keys())
+    all_exts  = disk_exts | set(ULTIMATE_RUNNERS.keys())
+
+    # Single file
+    if os.path.isfile(path):
+        ext = "." + path.lower().rsplit(".", 1)[-1]
+        if ext not in all_exts:
+            print(f"  Unsupported file type: {ext}")
+            return
+        print(f"  Reading {path} ...", end=" ", flush=True)
+        with open(path, "rb") as f:
+            data = f.read()
+        print(f"done  ({len(data):,} bytes)")
+        filename = os.path.basename(path)
+        run_on_ultimate(filename, data, ip)
+        return
+
+    # Directory
+    if os.path.isdir(path):
+        # Find all disk images
+        files = sorted(os.listdir(path))
+        disks = [(f, os.path.join(path, f)) for f in files
+                 if "." + f.lower().rsplit(".", 1)[-1] in disk_exts]
+        prgs  = [(f, os.path.join(path, f)) for f in files
+                 if "." + f.lower().rsplit(".", 1)[-1] in ULTIMATE_RUNNERS]
+
+        if not disks and not prgs:
+            print(f"  No supported files found in {path}")
+            return
+
+        # Single PRG/SID/CRT — just run it
+        if not disks and len(prgs) == 1:
+            fn, fp = prgs[0]
+            with open(fp, "rb") as f:
+                data = f.read()
+            run_on_ultimate(fn, data, ip)
+            return
+
+        # Single disk — just run it
+        if len(disks) == 1:
+            fn, fp = disks[0]
+            with open(fp, "rb") as f:
+                data = f.read()
+            run_on_ultimate(fn, data, ip)
+            return
+
+        # Multiple disks — check for flip file
+        flip_path = find_flip_file(path)
+        if flip_path:
+            print(f"  Found flip file: {os.path.basename(flip_path)}")
+            flip_entries = parse_flip_file(flip_path)
+            if flip_entries:
+                print(f"  Loading {len(flip_entries)} disks in flip order...")
+                disk_cache = []
+                for fn, duration in flip_entries:
+                    fp = os.path.join(path, fn)
+                    if os.path.isfile(fp):
+                        with open(fp, "rb") as f:
+                            data = f.read()
+                        disk_cache.append((fn, data))
+                        print(f"    {fn}  ({len(data):,} bytes)  [{duration}s]")
+                    else:
+                        print(f"    {fn}  NOT FOUND — skipping")
+
+                # Build flipinfo-like structure from flip file
+                flipinfo = [{"diskName": fn, "length": dur}
+                            for fn, dur in flip_entries]
+                # Re-pair with loaded data
+                cache_with_flip = [(fn, data) for fn, data in disk_cache]
+                run_autodisk(ip, cache_with_flip, flipinfo)
+                return
+
+        # Multiple disks, no flip file — load all and prompt
+        print(f"  {len(disks)} disk image(s) found, no flip file — manual swap mode")
+        disk_cache = []
+        for fn, fp in disks:
+            with open(fp, "rb") as f:
+                data = f.read()
+            disk_cache.append((fn, data))
+            print(f"    {fn}  ({len(data):,} bytes)")
+
+        fn, data = disk_cache[0]
+        if mount_and_run(ip, fn, data):
+            print()
+            print("  Press Enter when the demo asks for the next disk,")
+            print("  type a disk number to mount a specific one, or q to quit.")
+            disk_idx = 1
+            while disk_idx < len(disk_cache):
+                prompt = input(f"  [Enter=disk {disk_idx+1}, number, or q]: ").strip()
+                if prompt.lower() == "q":
+                    break
+                if prompt.isdigit():
+                    idx = int(prompt) - 1
+                    if 0 <= idx < len(disk_cache):
+                        disk_idx = idx
+                    else:
+                        print(f"  Invalid — valid range 1-{len(disk_cache)}")
+                        continue
+                fn, data = disk_cache[disk_idx]
+                mount_disk(ip, fn, data)
+                disk_idx += 1
+        return
+
+    print(f"  Not found: {path}")
 
 
-def cmd_reboot(args):
+def cmd_mount(args):
+    cfg = load_config()
+    ip  = args.ip or cfg.get("ultimate_ip", "")
+    if not ip:
+        ip = input("  Ultimate IP address: ").strip()
+        if not ip:
+            print("  No IP given.")
+            return
+    path = args.path
+    if not os.path.isfile(path):
+        print(f"  File not found: {path}")
+        return
+    ext = "." + path.lower().rsplit(".", 1)[-1]
+    if ext not in DISK_TYPES:
+        print(f"  Unsupported disk type: {ext}")
+        print(f"  Supported: {', '.join(DISK_TYPES)}")
+        return
+    print(f"  Reading {path} ...", end=" ", flush=True)
+    with open(path, "rb") as f:
+        data = f.read()
+    print(f"done  ({len(data):,} bytes)")
+    mount_disk(ip, os.path.basename(path), data)
+
+
+def cmd_reset(args):
     cfg = load_config()
     ip  = args.ip or cfg.get("ultimate_ip", "")
     if not ip:
@@ -1043,7 +1316,11 @@ Commands:
   charts  [name]   Browse top charts
   presets [type]   Browse AQL query presets
   cats             List all categories
-  reset            Reset the C64 (uses saved IP or prompts)
+  mount   <file>   Mount a local disk image on drive A (no reset or autorun)
+  run     <path>   Run a local file or directory on the Ultimate
+                   Supports: .prg .crt .sid .d64 .d71 .d81 .g64 .g71
+                   For directories: auto-detects flip-info.txt/.lst/.vfl
+                   for multi-disk ordering and auto-flip timings
   reboot           Reboot the C64 (reinitialises cartridge + reset)
   config           Show/set saved config
 
@@ -1136,6 +1413,14 @@ Examples:
     ca.add_argument("--download", action="store_true")
     ca.add_argument("--run",      metavar="IP")
 
+    ru = sub.add_parser("run", help="Run a local file or directory on the Ultimate")
+    ru.add_argument("path", metavar="PATH", help="File or directory to run")
+    ru.add_argument("--ip", metavar="IP", help="Ultimate IP (uses saved default if not given)")
+
+    mo = sub.add_parser("mount", help="Mount a local disk image on the Ultimate (no reset)")
+    mo.add_argument("path", metavar="PATH", help="Disk image file to mount")
+    mo.add_argument("--ip", metavar="IP", help="Ultimate IP (uses saved default if not given)")
+
     rst = sub.add_parser("reset", help="Reset the C64")
     rst.add_argument("--ip", metavar="IP", help="Ultimate IP (uses saved default if not given)")
 
@@ -1166,6 +1451,10 @@ def main():
         cmd_presets(args)
     elif args.cmd == "cats":
         cmd_categories(args)
+    elif args.cmd == "run":
+        cmd_run(args)
+    elif args.cmd == "mount":
+        cmd_mount(args)
     elif args.cmd == "reset":
         cmd_reset(args)
     elif args.cmd == "reboot":
