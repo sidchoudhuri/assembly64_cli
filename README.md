@@ -24,18 +24,22 @@ cp assembly64.py ~/.local/bin/assembly64
 ## Usage
 ```
 $ ./assembly64.py 
-usage: assembly64 [-h] {search,sid,charts,presets,cats,reset,config} ...
+usage: assembly64 [-h]
+                  {search,sid,charts,presets,cats,run,mount,reset,reboot,config} ...
 
 C64 scene lookup via the Assembly64 API (hackerswithstyle.se/leet/)
 
 positional arguments:
-  {search,sid,charts,presets,cats,reset,config}
+  {search,sid,charts,presets,cats,run,mount,reset,reboot,config}
     search              Search by name or AQL filters
     sid                 Search HVSC SID music by tune name
     charts              Browse top charts
     presets             Browse AQL query presets
-    cats                List all categories
+    cats                Browse categories
+    run                 Run a local file or directory on the Ultimate
+    mount               Mount a local disk image on the Ultimate (no reset)
     reset               Reset the C64
+    reboot              Reboot the C64 (reinitialises cartridge + reset)
     config              Show or set saved configuration
 
 options:
@@ -47,7 +51,12 @@ Commands:
   charts  [name]   Browse top charts
   presets [type]   Browse AQL query presets
   cats             List all categories
-  reset            Reset the C64 (uses saved IP or prompts)
+  mount   <file>   Mount a local disk image on drive A (no reset or autorun)
+  run     <path>   Run a local file or directory on the Ultimate
+                   Supports: .prg .crt .sid .d64 .d71 .d81 .g64 .g71
+                   For directories: auto-detects flip-info.txt/.lst/.vfl
+                   for multi-disk ordering and auto-flip timings
+  reboot           Reboot the C64 (reinitialises cartridge + reset)
   config           Show/set saved config
 
 After selecting any item you'll be prompted to:
@@ -66,7 +75,8 @@ Supported file types for --run:
 Multi-disk releases:
   Disks are downloaded upfront. You're prompted to flip manually,
   or use auto disk flip (if flip info available) which counts down
-  and mounts the next disk automatically. Press q+Enter to stop.
+  and mounts the next disk automatically.
+  During auto-flip: Enter=flip now, q+Enter=stop sequence
 
 Flags (bypass the interactive prompt):
   --download         download immediately without prompting
