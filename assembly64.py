@@ -1125,6 +1125,12 @@ def cmd_run(args):
             print("  No IP given.")
             return
 
+    # If --remote, delegate to rrun logic
+    if getattr(args, "remote", False):
+        args.ip = ip
+        cmd_rrun(args)
+        return
+
     path = args.path
     disk_exts = set(DISK_TYPES.keys())
     all_exts  = disk_exts | set(ULTIMATE_RUNNERS.keys())
@@ -1256,7 +1262,266 @@ def cmd_mount(args):
     mount_disk(ip, os.path.basename(path), data)
 
 
+def cmd_rrun(args):
+    """Run a file already on the Ultimate's filesystem."""
+    import time
+    cfg = load_config()
+    ip  = args.ip or cfg.get("ultimate_ip", "")
+    if not ip:
+        ip = input("  Ultimate IP address: ").strip()
+        if not ip:
+            print("  No IP given.")
+            return
+
+    path = "/" + args.path.lstrip("/")
+    ext  = "." + path.lower().rsplit(".", 1)[-1]
+
+    if ext in ULTIMATE_RUNNERS:
+        # PRG/CRT/SID — use run_prg/run_crt/sidplay with file= param
+        runner = ULTIMATE_RUNNERS[ext]
+        print(f"  Running {path} on Ultimate ...", end=" ", flush=True)
+        try:
+            status = ultimate_put(ip, f"runners:{runner}", {"file": path})
+            print(f"done  ({status})")
+        except Exception as e:
+            print(f"FAILED: {e}")
+
+    elif ext in DISK_TYPES:
+        # D64 — mount by path then reset + keyboard inject
+        print(f"  Mounting {path} ...", end=" ", flush=True)
+        try:
+            status = ultimate_put(ip, "drives/a:mount", {"image": path, "mode": "unlinked"})
+            print(f"done  ({status})")
+        except Exception as e:
+            print(f"FAILED: {e}")
+            return
+        print(f"  Resetting machine ...", end=" ", flush=True)
+        try:
+            ultimate_put(ip, "machine:reset")
+            print("done")
+        except Exception as e:
+            print(f"FAILED: {e}")
+            return
+        time.sleep(3)
+        print('  Injecting LOAD"*",8,1 + RUN ...')
+        inject_keyboard(ip, 'LOAD"*",8,1\rRUN\r')
+    else:
+        print(f"  Unsupported file type: {ext}")
+        print(f"  Supported: {', '.join(list(ULTIMATE_RUNNERS) + list(DISK_TYPES))}")
+
+
+def ftp_base(ip):
+    return f"ftp://{ip}"
+
+
+def ftp_url(ip, path):
+    """Build an FTP URL with spaces in path components properly encoded."""
+    encoded = "/".join(urllib.parse.quote(p, safe="") for p in path.split("/"))
+    return f"ftp://{ip}/{encoded}"
+
+
+def cmd_pull(args):
+    """Download a file from the Ultimate."""
+    import subprocess, fnmatch
+    cfg = load_config()
+    ip  = args.ip or cfg.get("ultimate_ip", "")
+    if not ip:
+        ip = input("  Ultimate IP address: ").strip()
+        if not ip:
+            print("  No IP given.")
+            return
+
+    remote = args.remote.lstrip("/")
+
+    # If wildcard or no extension (treat as prefix), resolve via directory listing
+    last = remote.split("/")[-1]
+    if "*" in remote or "?" in remote or ("." not in last and last):
+        if "*" in remote or "?" in remote:
+            print("  Tip: on zsh, quote wildcards to avoid shell expansion: \"GH*\"")
+        parent  = "/".join(remote.split("/")[:-1])
+        pattern = last.lower() + ("" if "*" in last or "?" in last else "*")
+        list_url = ftp_url(ip, parent + "/") if parent else ftp_url(ip, "")
+        res = subprocess.run(["curl", "-s", list_url], capture_output=True, text=True)
+        matches = []
+        for line in res.stdout.strip().splitlines():
+            parts = line.split(None, 8)
+            if len(parts) >= 9:
+                name = parts[8]
+                if fnmatch.fnmatch(name.lower(), pattern):
+                    matches.append(name)
+        if not matches:
+            print(f"  No files matching {remote}")
+            return
+        if len(matches) > 1:
+            print(f"  {len(matches)} files match:")
+            for m in matches:
+                print(f"    {m}")
+            ans = input(f"  Download all {len(matches)} files? [y/N]: ").strip().lower()
+            if ans != "y":
+                return
+            for m in matches:
+                r = f"{parent}/{m}" if parent else m
+                local = args.local or m
+                url   = ftp_url(ip, r)
+                print(f"  Pulling {r} -> {m} ...")
+                result = subprocess.run(["curl", "-s", "-o", m, url], capture_output=True, text=True)
+                if result.returncode == 0 and os.path.exists(m):
+                    print(f"  Saved  ->  {m}  ({os.path.getsize(m):,} bytes)")
+                else:
+                    print(f"  FAILED: {result.stderr.strip() or 'unknown error'}")
+            return
+        remote = f"{parent}/{matches[0]}" if parent else matches[0]
+        print(f"  Resolved: {remote}")
+
+    local = args.local or remote.split("/")[-1]
+    url   = ftp_url(ip, remote)
+
+    print(f"  Pulling {remote} -> {local} ...")
+    result = subprocess.run(["curl", "-s", "-o", local, url], capture_output=True, text=True)
+    if result.returncode == 0 and os.path.exists(local):
+        size = os.path.getsize(local)
+        print(f"  Saved  ->  {local}  ({size:,} bytes)")
+    else:
+        print(f"  FAILED: {result.stderr.strip() or 'unknown error'}")
+
+
+def cmd_push(args):
+    """Upload a local file to the Ultimate USB stick."""
+    import subprocess
+    cfg = load_config()
+    ip  = args.ip or cfg.get("ultimate_ip", "")
+    if not ip:
+        ip = input("  Ultimate IP address: ").strip()
+        if not ip:
+            print("  No IP given.")
+            return
+
+    import glob
+    local_arg = args.local
+    local_files = [f for f in glob.glob(local_arg) if os.path.isfile(f)] \
+                  if ("*" in local_arg or "?" in local_arg) else [local_arg]
+
+    if not local_files:
+        print(f"  No files matching: {local_arg}")
+        return
+
+    if len(local_files) > 1:
+        print(f"  {len(local_files)} files match:")
+        for f in local_files:
+            print(f"    {f}  ({os.path.getsize(f):,} bytes)")
+        ans = input(f"  Push all {len(local_files)} files? [y/N]: ").strip().lower()
+        if ans != "y":
+            return
+
+    for local in local_files:
+        if not os.path.isfile(local):
+            print(f"  File not found: {local}")
+            continue
+        filename = os.path.basename(local)
+        remote   = args.remote.rstrip("/") + "/" + filename if args.remote else filename
+        remote   = remote.lstrip("/")
+        url      = ftp_url(ip, remote)
+        size = os.path.getsize(local)
+        print(f"  Pushing {local} ({size:,} bytes) -> {remote} ...")
+        result = subprocess.run(["curl", "-s", "-T", local, url], capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"  Done.")
+        else:
+            print(f"  FAILED: {result.stderr.strip() or 'unknown error'}")
+
+
+def cmd_ls(args):
+    """List files on the Ultimate."""
+    import subprocess, fnmatch
+    cfg = load_config()
+    ip  = args.ip or cfg.get("ultimate_ip", "")
+    if not ip:
+        ip = input("  Ultimate IP address: ").strip()
+        if not ip:
+            print("  No IP given.")
+            return
+
+    info = None
+    try:
+        req  = urllib.request.Request(f"http://{ip}/v1/info")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            info = json.loads(r.read().decode("utf-8"))
+    except Exception:
+        pass
+    hostname = info.get("hostname", ip) if info else ip
+
+    path = (args.path or "/").lstrip("/")
+
+    # Determine parent and filter pattern
+    # Works for explicit wildcards (GH*) or bare prefixes (GH)
+    if "*" in path or "?" in path:
+        print("  Tip: on zsh, quote wildcards to avoid shell expansion: \"GH*\"")
+        parent  = "/".join(path.split("/")[:-1])
+        pattern = path.split("/")[-1].lower()
+    else:
+        # Try listing as a directory first; if empty/failed treat last component as prefix filter
+        remote = path if path.endswith("/") else path + "/"
+        result = subprocess.run(["curl", "-s", ftp_url(ip, remote)], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            # It's a valid directory — show it
+            header(f"{hostname}: /{remote}")
+            for line in result.stdout.strip().splitlines():
+                parts = line.split(None, 8)
+                if len(parts) >= 9:
+                    is_dir = parts[0].startswith("d")
+                    size   = parts[4] if not is_dir else ""
+                    name   = parts[8]
+                    if is_dir:
+                        print(f"  [{name}/]")
+                    else:
+                        print(f"  {name}  ({int(size):,} bytes)" if size else f"  {name}")
+                else:
+                    print(f"  {line}")
+            sep()
+            return
+        # Not a directory — treat last component as prefix filter on parent
+        parent  = "/".join(path.split("/")[:-1])
+        pattern = path.split("/")[-1].lower() + "*"
+
+    list_url = ftp_url(ip, parent + "/") if parent else ftp_url(ip, "")
+    result = subprocess.run(["curl", "-s", list_url], capture_output=True, text=True)
+    label = pattern.rstrip("*") if pattern.endswith("*") and "*" not in pattern[:-1] else pattern
+    header(f"{hostname}: /{parent}/ (filter: {label})")
+    found = False
+    for line in result.stdout.strip().splitlines():
+        parts = line.split(None, 8)
+        if len(parts) >= 9:
+            is_dir = parts[0].startswith("d")
+            size   = parts[4] if not is_dir else ""
+            name   = parts[8]
+            if fnmatch.fnmatch(name.lower(), pattern):
+                found = True
+                if is_dir:
+                    print(f"  [{name}/]")
+                else:
+                    print(f"  {name}  ({int(size):,} bytes)" if size else f"  {name}")
+    if not found:
+        print(f"  No matches for '{label}'")
+    sep()
+
+
 def cmd_reset(args):
+    cfg = load_config()
+    ip  = args.ip or cfg.get("ultimate_ip", "")
+    if not ip:
+        ip = input("  Ultimate IP address: ").strip()
+        if not ip:
+            print("  No IP given.")
+            return
+    print(f"  Resetting C64 at {ip} ...", end=" ", flush=True)
+    try:
+        status = ultimate_put(ip, "machine:reset")
+        print(f"done  ({status})")
+    except Exception as e:
+        print(f"FAILED: {e}")
+
+
+def cmd_reboot(args):
     cfg = load_config()
     ip  = args.ip or cfg.get("ultimate_ip", "")
     if not ip:
@@ -1319,8 +1584,17 @@ Commands:
   charts  [name]   Browse top charts
   presets [type]   Browse AQL query presets
   cats             List all categories
+  ls      [path]   List files on the Ultimate
+  pull    <remote> [local]   Download file from the Ultimate
+  push    <local>  [remote]  Upload file to the Ultimate
+                   Paths support prefix filtering without wildcards:
+                   ls SD/_BASIC/GH        -- lists all entries starting with GH
+                   pull SD/_BASIC/GH      -- downloads matching file(s)
+                   On zsh, quote wildcards if you use them: "GH*"
+  rrun    <path>   Run a file already on the Ultimate filesystem (PRG/CRT/SID/D64)
   mount   <file>   Mount a local disk image on drive A (no reset or autorun)
   run     <path>   Run a local file or directory on the Ultimate
+                   --remote: path is on the Ultimate filesystem (same as rrun)
                    Supports: .prg .crt .sid .d64 .d71 .d81 .g64 .g71
                    For directories: auto-detects flip-info.txt/.lst/.vfl
                    for multi-disk ordering and auto-flip timings
@@ -1419,6 +1693,25 @@ Examples:
     ru = sub.add_parser("run", help="Run a local file or directory on the Ultimate")
     ru.add_argument("path", metavar="PATH", help="File or directory to run")
     ru.add_argument("--ip", metavar="IP", help="Ultimate IP (uses saved default if not given)")
+    ru.add_argument("--remote", action="store_true", help="Path is on the Ultimate filesystem, not local")
+
+    ls = sub.add_parser("ls", help="List files on the Ultimate")
+    ls.add_argument("path", nargs="?", metavar="PATH", help="Remote path (default: USB1/)")
+    ls.add_argument("--ip", metavar="IP")
+
+    pu = sub.add_parser("pull", help="Download a file from the Ultimate")
+    pu.add_argument("remote", metavar="REMOTE", help="Remote path e.g. USB1/DEMOS/foo.d64")
+    pu.add_argument("local", nargs="?", metavar="LOCAL", help="Local filename (default: basename of remote)")
+    pu.add_argument("--ip", metavar="IP")
+
+    ps = sub.add_parser("push", help="Upload a file to the Ultimate")
+    ps.add_argument("local", metavar="LOCAL", help="Local file to upload")
+    ps.add_argument("remote", nargs="?", metavar="REMOTE", help="Remote directory (default: USB1/)")
+    ps.add_argument("--ip", metavar="IP")
+
+    rr = sub.add_parser("rrun", help="Run a file already on the Ultimate filesystem")
+    rr.add_argument("path", metavar="PATH", help="Path on Ultimate e.g. SD/_BASIC/Tetris.d64")
+    rr.add_argument("--ip", metavar="IP")
 
     mo = sub.add_parser("mount", help="Mount a local disk image on the Ultimate (no reset)")
     mo.add_argument("path", metavar="PATH", help="Disk image file to mount")
@@ -1456,6 +1749,14 @@ def main():
         cmd_categories(args)
     elif args.cmd == "run":
         cmd_run(args)
+    elif args.cmd == "ls":
+        cmd_ls(args)
+    elif args.cmd == "pull":
+        cmd_pull(args)
+    elif args.cmd == "push":
+        cmd_push(args)
+    elif args.cmd == "rrun":
+        cmd_rrun(args)
     elif args.cmd == "mount":
         cmd_mount(args)
     elif args.cmd == "reset":
