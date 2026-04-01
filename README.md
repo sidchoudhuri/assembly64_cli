@@ -1,5 +1,5 @@
 ### Coming Soon!
-1. automatic disk change for multi-disk demos via flipdisk.txt
+1. DONE! automatic disk change for multi-disk demos via flipdisk.txt
 2. multiple Ultimate devices
 3. favorites
 ### [Code notes](code_notes.md)
