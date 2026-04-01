@@ -1091,18 +1091,21 @@ def parse_flip_file(path):
 
 def find_flip_file(directory):
     """Look for a flip/swap file in the given directory.
-    Returns path of best match, or None. Warns if multiple found."""
-    preferred = []
+    Priority: numbered *-flip-info.txt > plain flip-info.txt > .lst > .vfl"""
+    numbered  = []
+    plain     = []
     others    = []
     for f in os.listdir(directory):
         fl = f.lower()
         fp = os.path.join(directory, f)
-        if fl in ("flip-info.txt", "flipinfo.txt", "flip_info.txt") or \
-           fl.endswith("-flip-info.txt") or fl.endswith("_flip_info.txt"):
-            preferred.append(fp)
+        if fl.endswith("-flip-info.txt") or fl.endswith("_flip_info.txt"):
+            # Numbered ones (e.g. 72550-flip-info.txt) — highest priority
+            numbered.append(fp)
+        elif fl in ("flip-info.txt", "flipinfo.txt", "flip_info.txt"):
+            plain.append(fp)
         elif fl.endswith(".lst") or fl.endswith(".vfl"):
             others.append(fp)
-    all_found = preferred + others
+    all_found = numbered + plain + others
     if not all_found:
         return None
     if len(all_found) > 1:
