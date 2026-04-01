@@ -5,7 +5,7 @@
 ### [Code notes](code_notes.md)
 ---
 # assembly64_cli
-A command-line C64 scene lookup tool powered by the [Assembly64 API](https://hackerswithstyle.se/leet/swagger-ui).
+A command-line C64 scene lookup tool for the 1541 Ultimate II/II+L, Ultimate64/Ultimate64 Elite II, & Commodore 64 Ultimate powered by the [Assembly64 API](https://hackerswithstyle.se/leet/swagger-ui).
 
 ## Setup
 
