@@ -1,5 +1,5 @@
 ### Coming Soon!
-1. automatic disk change for multi-disk demos via flipdisk.txt
+1. DONE! automatic disk change for multi-disk demos via flipdisk.txt
 2. multiple Ultimate devices
 3. favorites
 ### [Code notes](code_notes.md)
@@ -206,7 +206,7 @@ $
 ```
 ## Example: Searching the demo charts and running a multi-disk demo on the C64 Ultimate
 ```
-$ ./assembly64.py charts                       
+idun  demos $ assembly64 charts
 --------------------------------------------------------------
   AVAILABLE CHARTS
 --------------------------------------------------------------
@@ -241,9 +241,9 @@ $ ./assembly64.py charts
    17. What Is The Matrix 2  []  *9.57
    18. Unboxed  []  *9.56
    19. Lifecycle  []  *9.55
-   20. The XFile  []  *9.55
+   20. Wonderland XIV  []  *9.55
 
-  Showing 1-20 of 200  |  n/→=next  p/←=prev  q=quit
+  Showing 1-20 of 200  |  n/->=next  p/<-=prev  q=quit
 
   Enter number to view details: 5
 --------------------------------------------------------------
@@ -254,6 +254,8 @@ $ ./assembly64.py charts
   Rating:          9.6748466257669
 --------------------------------------------------------------
 
+  Flip info available -- 3 disks with auto-flip timings.
+
   Files:
       1. fairlight-1337-58679b69-a.d64  (196,608 bytes)
       2. fairlight-1337-58679b69-b.d64  (196,608 bytes)
@@ -261,8 +263,26 @@ $ ./assembly64.py charts
       4. flip-info.txt  (98 bytes)
 
   [1] Run on Ultimate (192.168.2.32)
-  [2] Download to current directory
-  [3] Quit
+  [2] Run with auto disk flip (192.168.2.32)
+  [3] Download to current directory
+  [4] Quit
+
+  Choose action (or Enter to quit): 2
+
+  Multi-disk release -- 3 disk image(s):
+    1. fairlight-1337-58679b69-a.d64  (196,608 bytes)
+    2. fairlight-1337-58679b69-b.d64  (196,608 bytes)
+    3. fairlight-1337-58679b69-c.d64  (196,608 bytes)
+
+  Downloading all disks...
+  Fetching fairlight-1337-58679b69-a.d64 ... done  (196,608 bytes)
+  Fetching fairlight-1337-58679b69-b.d64 ... done  (196,608 bytes)
+  Fetching fairlight-1337-58679b69-c.d64 ... done  (196,608 bytes)
+  Uploading and mounting fairlight-1337-58679b69-a.d64 ... done  -> /Temp/temp0005
+  Resetting machine ... done
+  Injecting LOAD"*",8,1 + RUN ...
+  Waiting for load to complete ... done  (3713)
+  Load detection took 6.2s
 
   Choose action (or Enter to quit): 1
 
@@ -279,12 +299,17 @@ $ ./assembly64.py charts
   Resetting machine ... done
   Waiting for BASIC prompt ... done
   Injecting LOAD"*",8,1 + RUN ...
+  Waiting for load to complete ... done  (3713)
+  Load detection took 6.2s
 
-  Press Enter when the demo asks for the next disk,
-  type a disk number to mount a specific one, or q to quit.
-  [Enter=disk 2, number, or q]: 
+  Press Enter to flip immediately, q+Enter to stop.
+  Auto-flip: disk 2 (fairlight-1337-58679b69-b.d64) in 0m 01s ...
+  Auto-flip to disk 2: fairlight-1337-58679b69-b.d64
   Mounting fairlight-1337-58679b69-b.d64 on drive A: ... done  (200)
-  [Enter=disk 3, number, or q]: 
+  Auto-flip: disk 3 (fairlight-1337-58679b69-c.d64) in 0m 01s ...
+  Auto-flip to disk 3: fairlight-1337-58679b69-c.d64
   Mounting fairlight-1337-58679b69-c.d64 on drive A: ... done  (200)
+
+  All disks played.
 $ 
 ```
