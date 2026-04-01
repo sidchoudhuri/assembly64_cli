@@ -18,8 +18,10 @@ chmod +x assembly64.py
 
 Optionally add to your PATH:
 ```bash
-cp assembly64.py ~/.local/bin/assembly64
+cp assembly64.py ~/.local/bin/assembly64.py
 ```
+Add
+
 
 ## Usage
 ```
@@ -204,7 +206,7 @@ $ ./assembly64.py search "qdor qdor" --download
   Saved  ->  qdor-qdor-75db9b39.d64
 $ 
 ```
-## Example: Searching the demo charts and running a multi-disk demo on the C64 Ultimate
+## Example: Searching the demo charts and running a multi-disk demo from the IDUN cartridge 
 ```
 idun  demos $ assembly64 charts
 --------------------------------------------------------------
@@ -284,24 +286,6 @@ idun  demos $ assembly64 charts
   Waiting for load to complete ... done  (3713)
   Load detection took 6.2s
 
-  Choose action (or Enter to quit): 1
-
-  Multi-disk release — 3 disk image(s):
-    1. fairlight-1337-58679b69-a.d64  (196,608 bytes)
-    2. fairlight-1337-58679b69-b.d64  (196,608 bytes)
-    3. fairlight-1337-58679b69-c.d64  (196,608 bytes)
-
-  Downloading all disks...
-  Fetching fairlight-1337-58679b69-a.d64 ... done  (196,608 bytes)
-  Fetching fairlight-1337-58679b69-b.d64 ... done  (196,608 bytes)
-  Fetching fairlight-1337-58679b69-c.d64 ... done  (196,608 bytes)
-  Mounting fairlight-1337-58679b69-a.d64 on drive A: ... done  (200)
-  Resetting machine ... done
-  Waiting for BASIC prompt ... done
-  Injecting LOAD"*",8,1 + RUN ...
-  Waiting for load to complete ... done  (3713)
-  Load detection took 6.2s
-
   Press Enter to flip immediately, q+Enter to stop.
   Auto-flip: disk 2 (fairlight-1337-58679b69-b.d64) in 0m 01s ...
   Auto-flip to disk 2: fairlight-1337-58679b69-b.d64
@@ -311,5 +295,5 @@ idun  demos $ assembly64 charts
   Mounting fairlight-1337-58679b69-c.d64 on drive A: ... done  (200)
 
   All disks played.
-$ 
+idun  demos $ 
 ```
