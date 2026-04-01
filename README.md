@@ -27,18 +27,22 @@ Add
 ```
 $ ./assembly64.py 
 usage: assembly64 [-h]
-                  {search,sid,charts,presets,cats,run,mount,reset,reboot,config} ...
+                  {search,sid,charts,presets,cats,run,ls,pull,push,rrun,mount,reset,reboot,config} ...
 
 C64 scene lookup via the Assembly64 API (hackerswithstyle.se/leet/)
 
 positional arguments:
-  {search,sid,charts,presets,cats,run,mount,reset,reboot,config}
+  {search,sid,charts,presets,cats,run,ls,pull,push,rrun,mount,reset,reboot,config}
     search              Search by name or AQL filters
     sid                 Search HVSC SID music by tune name
     charts              Browse top charts
     presets             Browse AQL query presets
     cats                Browse categories
     run                 Run a local file or directory on the Ultimate
+    ls                  List files on the Ultimate
+    pull                Download a file from the Ultimate
+    push                Upload a file to the Ultimate
+    rrun                Run a file already on the Ultimate filesystem
     mount               Mount a local disk image on the Ultimate (no reset)
     reset               Reset the C64
     reboot              Reboot the C64 (reinitialises cartridge + reset)
@@ -53,8 +57,17 @@ Commands:
   charts  [name]   Browse top charts
   presets [type]   Browse AQL query presets
   cats             List all categories
+  ls      [path]   List files on the Ultimate
+  pull    <remote> [local]   Download file from the Ultimate
+  push    <local>  [remote]  Upload file to the Ultimate
+                   Paths support prefix filtering without wildcards:
+                   ls SD/_BASIC/GH        -- lists all entries starting with GH
+                   pull SD/_BASIC/GH      -- downloads matching file(s)
+                   On zsh, quote wildcards if you use them: "GH*"
+  rrun    <path>   Run a file already on the Ultimate filesystem (PRG/CRT/SID/D64)
   mount   <file>   Mount a local disk image on drive A (no reset or autorun)
   run     <path>   Run a local file or directory on the Ultimate
+                   --remote: path is on the Ultimate filesystem (same as rrun)
                    Supports: .prg .crt .sid .d64 .d71 .d81 .g64 .g71
                    For directories: auto-detects flip-info.txt/.lst/.vfl
                    for multi-disk ordering and auto-flip timings
@@ -62,10 +75,10 @@ Commands:
   config           Show/set saved config
 
 After selecting any item you'll be prompted to:
-  Run on Ultimate          — sends file to your C64 via REST API
-  Run with auto disk flip  — auto-mounts disks using Assembly64 flip timings
+  Run on Ultimate          -- sends file to your C64 via REST API
+  Run with auto disk flip  -- auto-mounts disks using Assembly64 flip timings
                              (only shown when flip info is available)
-  Download                 — saves to current directory
+  Download                 -- saves to current directory
   Quit
 
 Supported file types for --run:
@@ -87,7 +100,7 @@ Flags (bypass the interactive prompt):
   --files            show file listing only, no action
   --limit N          max AQL results (default 50)
 
-Pagination: n/→ next page, p/← prev page, q/Enter to quit
+Pagination: n/-> next page, p/<- prev page, q/Enter to quit
 
 Save your Ultimate IP so you don't have to type it every time:
   assembly64 config --set-ip 192.168.2.32
@@ -119,8 +132,8 @@ Examples:
   assembly64 presets
   assembly64 reset
   assembly64 config --set-ip 192.168.2.32
-$ 
-```
+  $
+  ```
 ## Example: looking up the first 50 demos from Fairlight in descending order (newest first)
 ```
 sid@sid-macbookprom4 run % ./assembly64.py search --group fairlight --cat demos --order desc
