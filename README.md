@@ -48,20 +48,38 @@ Commands:
   presets [type]   Browse AQL query presets
   cats             List all categories
   reset            Reset the C64 (uses saved IP or prompts)
-  config           Show/set saved config (e.g. default Ultimate IP)
+  config           Show/set saved config
 
 After selecting any item you'll be prompted to:
-  Run on Ultimate  — sends file to your C64 via REST API
-  Download         — saves to current directory
+  Run on Ultimate          — sends file to your C64 via REST API
+  Run with auto disk flip  — auto-mounts disks using Assembly64 flip timings
+                             (only shown when flip info is available)
+  Download                 — saves to current directory
   Quit
 
-Flags bypass the prompt:
-  --download   download immediately
-  --run IP     run on Ultimate immediately
-  --files      show file list only, no action
+Supported file types for --run:
+  .prg / .crt   DMA load and run
+  .sid          SID player
+  .d64 / .g64 / .d71 / .g71 / .d81
+                mount on drive A, reset, inject LOAD"*",8,1 + RUN
+
+Multi-disk releases:
+  Disks are downloaded upfront. You're prompted to flip manually,
+  or use auto disk flip (if flip info available) which counts down
+  and mounts the next disk automatically. Press q+Enter to stop.
+
+Flags (bypass the interactive prompt):
+  --download         download immediately without prompting
+  --run IP           run on Ultimate at IP without prompting
+  --autodisk         use auto disk flip timing (requires --run)
+  --files            show file listing only, no action
+  --limit N          max AQL results (default 50)
+
+Pagination: n/→ next page, p/← prev page, q/Enter to quit
 
 Save your Ultimate IP so you don't have to type it every time:
-  assembly64 config --set-ip 192.168.1.10
+  assembly64 config --set-ip 192.168.2.32
+  assembly64 config --show
 
 Name search (uses search/releases):
   assembly64 search "edge of disgrace"         CSDB demos (default)
@@ -75,18 +93,20 @@ AQL filter search (needs at least one of --group/--handle/--repo/--cat/--date):
   --cat      demos, games, graphics, music, discmags, tools, sid, hvsc, misc, intros, c128, bbs, charts
   --date / --after / --before   YYYYMMDD
   --order    asc or desc
-  --limit    max results (default 50)
 
 Examples:
   assembly64 search "edge of disgrace"
+  assembly64 search "edge of disgrace" --run 192.168.2.32
+  assembly64 search "edge of disgrace" --run 192.168.2.32 --autodisk
   assembly64 search --group fairlight --cat demos --order asc
   assembly64 search --group "Booze Design" --after 20000101
   assembly64 search --handle laxity --repo csdb
   assembly64 sid sanxion
   assembly64 charts
+  assembly64 charts "Top Demos"
   assembly64 presets
+  assembly64 reset
   assembly64 config --set-ip 192.168.2.32
-        
 $ 
 ```
 ## Example: looking up the first 50 demos from Fairlight in descending order (newest first)
