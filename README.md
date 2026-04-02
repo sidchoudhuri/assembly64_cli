@@ -1,11 +1,6 @@
-### Coming Soon!
-1. DONE! automatic disk change for multi-disk demos via flipdisk.txt
-2. multiple Ultimate devices
-3. favorites
-### [Code notes](code_notes.md)
----
 # assembly64_cli
 A command-line C64 scene lookup tool for the 1541 Ultimate II/II+L, Ultimate64/Ultimate64 Elite II, & Commodore 64 Ultimate powered by the [Assembly64 API](https://hackerswithstyle.se/leet/swagger-ui) & the [Ultimate 64 API](https://1541u-documentation.readthedocs.io/en/latest/api/api_calls.html).
+### [Code notes](code_notes.md)
 
 ## Setup
 
@@ -20,123 +15,109 @@ Optionally add to your PATH:
 ```bash
 cp assembly64.py ~/.local/bin/assembly64.py
 ```
-Add
-
 
 ## Usage
 ```
-$ ./assembly64.py 
-usage: assembly64 [-h]
-                  {search,sid,charts,presets,cats,run,ls,pull,push,rrun,mount,reset,reboot,config} ...
+$ ./assembly64.py --fullhelp
 
-C64 scene lookup via the Assembly64 API (hackerswithstyle.se/leet/)
+ASSEMBLY64 CLI - C64 Scene Lookup Tool
+APIS: hackerswithstyle.se/leet/
+github.com/GideonZ/1541u-documentation
 
-positional arguments:
-  {search,sid,charts,presets,cats,run,ls,pull,push,rrun,mount,reset,reboot,config}
-    search              Search by name or AQL filters
-    sid                 Search HVSC SID music by tune name
-    charts              Browse top charts
-    presets             Browse AQL query presets
-    cats                Browse categories
-    run                 Run a local file or directory on the Ultimate
-    ls                  List files on the Ultimate
-    pull                Download a file from the Ultimate
-    push                Upload a file to the Ultimate
-    rrun                Run a file already on the Ultimate filesystem
-    mount               Mount a local disk image on the Ultimate (no reset)
-    reset               Reset the C64
-    reboot              Reboot the C64 (reinitialises cartridge + reset)
-    config              Show or set saved configuration
+COMMANDS
+  search [query]   Search releases
+  sid <query>      Search HVSC SIDs
+  charts           Browse top charts
+  presets          Browse AQL presets
+  cats             Browse categories
+  ls/remote [path] Browse Ultimate files
+  push/put <file>  Upload to Ultimate
+  pull/get <path>  Download
+  run <path>       Run local file/dir
+  rrun <path>      Run file on Ultimate
+  mount <file>     Mount local disk
+  rmount <path>    Mount remote disk
+  mkdir <path>     Create directory
+  rename <old> <new>  Rename
+  delete <path>    Delete file/dir
+  reset            Reset the C64
+  reboot           Reboot the C64
+  device/devices   List devices
+  config           Show/set config
+  help             Show this help
 
-options:
-  -h, --help            show this help message and exit
+SEARCH FLAGS
+  --group  --handle  --repo  --cat
+  --date / --after / --before
+  --order asc|desc  --limit N
+  --download  --run IP  --autodisk
 
-Commands:
-  search  [query]  Search by name or AQL filters
-  sid     <query>  Search HVSC SID music
-  charts  [name]   Browse top charts
-  presets [type]   Browse AQL query presets
-  cats             List all categories
-  ls      [path]   List files on the Ultimate
-  pull    <remote> [local]   Download file from the Ultimate
-  push    <local>  [remote]  Upload file to the Ultimate
-                   Paths support prefix filtering without wildcards:
-                   ls SD/_BASIC/GH        -- lists all entries starting with GH
-                   pull SD/_BASIC/GH      -- downloads matching file(s)
-                   On zsh, quote wildcards if you use them: "GH*"
-  rrun    <path>   Run a file already on the Ultimate filesystem (PRG/CRT/SID/D64)
-  mount   <file>   Mount a local disk image on drive A (no reset or autorun)
-  run     <path>   Run a local file or directory on the Ultimate
-                   --remote: path is on the Ultimate filesystem (same as rrun)
-                   Supports: .prg .crt .sid .d64 .d71 .d81 .g64 .g71
-                   For directories: auto-detects flip-info.txt/.lst/.vfl
-                   for multi-disk ordering and auto-flip timings
-  reboot           Reboot the C64 (reinitialises cartridge + reset)
-  config           Show/set saved config
+FILE TYPES
+  .prg .crt   DMA load and run
+  .sid        SID player
+  .d64 .d71 .d81 .g64 .g71
+              Mount, reset, autorun
 
-After selecting any item you'll be prompted to:
-  Run on Ultimate          -- sends file to your C64 via REST API
-  Run with auto disk flip  -- auto-mounts disks using Assembly64 flip timings
-                             (only shown when flip info is available)
-  Download                 -- saves to current directory
-  Quit
+MULTI-DISK AUTO-FLIP
+  Enter=flip now  q+Enter=stop
 
-Supported file types for --run:
-  .prg / .crt   DMA load and run
-  .sid          SID player
-  .d64 / .g64 / .d71 / .g71 / .d81
-                mount on drive A, reset, inject LOAD"*",8,1 + RUN
+LS/REMOTE BROWSER KEYS
+  number    select / descend
+  u / ^     go up a level
+  b / <-    prev page
+  n / ->    next page
+  m         make directory
+  r         rename
+  d         delete
+  q         quit
 
-Multi-disk releases:
-  Disks are downloaded upfront. You're prompted to flip manually,
-  or use auto disk flip (if flip info available) which counts down
-  and mounts the next disk automatically.
-  During auto-flip: Enter=flip now, q+Enter=stop sequence
+LS TIPS
+  ls              start at / or default
+  ls USB1/DEMOS   start at specific path
+  ls U64EII       use named device
+  config --set-ls-path USB1  set default
 
-Flags (bypass the interactive prompt):
-  --download         download immediately without prompting
-  --run IP           run on Ultimate at IP without prompting
-  --autodisk         use auto disk flip timing (requires --run)
-  --files            show file listing only, no action
-  --limit N          max AQL results (default 50)
+CONFIG FLAGS
+  --set-ip IP      Set active IP
+  --set-demos-dir  Set demos dir
+  --set-sids-dir   Set SIDs dir
+  --set-ls-path    Set default ls path
+  --add NAME IP    Add a device
+  --remove NAME    Remove a device
+  --set NAME       Set active device
+  --next           Cycle to next device
 
-Pagination: n/-> next page, p/<- prev page, q/Enter to quit
 
-Save your Ultimate IP so you don't have to type it every time:
-  assembly64 config --set-ip 192.168.2.32
-  assembly64 config --show
-
-Name search (uses search/releases):
-  assembly64 search "edge of disgrace"         CSDB demos (default)
-  assembly64 search "commando" --cat games     CSDB games
-  assembly64 sid sanxion                       HVSC SIDs
-
-AQL filter search (needs at least one of --group/--handle/--repo/--cat/--date):
-  --group    group name  e.g. fairlight, "Booze Design"
-  --handle   scener      e.g. laxity
-  --repo     c64com, c64orgintro, commodore, csdb, gamebase64, guybrush, hvsc, mayhem, oneload, pres, seuck, tapes, utape
-  --cat      demos, games, graphics, music, discmags, tools, sid, hvsc, misc, intros, c128, bbs, charts
-  --date / --after / --before   YYYYMMDD
-  --order    asc or desc
-
-Examples:
+EXAMPLES
   assembly64 search "edge of disgrace"
-  assembly64 search "edge of disgrace" --run 192.168.2.32
-  assembly64 search "edge of disgrace" --run 192.168.2.32 --autodisk
-  assembly64 search --group fairlight --cat demos --order asc
-  assembly64 search --group "Booze Design" --after 20000101
-  assembly64 search --handle laxity --repo csdb
+  assembly64 search --group fairlight
+  assembly64 search --handle laxity
   assembly64 sid sanxion
   assembly64 charts
-  assembly64 charts "Top Demos"
-  assembly64 presets
+  assembly64 ls
+  assembly64 ls USB1/DEMOS
+  assembly64 ls U64EII
+  assembly64 remote
+  assembly64 push game.d64
+  assembly64 run mygame.d64
+  assembly64 rrun SD/_BASIC/Tetris.d64
   assembly64 reset
+  assembly64 device
+  assembly64 config
   assembly64 config --set-ip 192.168.2.32
-  $
+  assembly64 config --set-demos-dir ~/demos
+  assembly64 config --set-sids-dir ~/sids
+  assembly64 config --set-ls-path USB1
+  assembly64 config --add U64 192.168.2.32
+  assembly64 config --add U2L 192.168.2.33
+  assembly64 config --set U2L
+  assembly64 config --next
+  assembly64 config --remove U2L
+$
   ```
 ## Example: looking up the first 50 demos from Fairlight in descending order (newest first)
 ```
-sid@sid-macbookprom4 run % ./assembly64.py search --group fairlight --cat demos --order desc
+$ ./assembly64.py search --group fairlight --cat demos --order desc
 
   50 result(s):
 
@@ -158,12 +139,9 @@ sid@sid-macbookprom4 run % ./assembly64.py search --group fairlight --cat demos 
    16. Edison 2025 Invite  [Fairlight  2025-01-01  37]
    17. The Fair Light  [Fairlight  2025-01-01  37]
    18. OTech People III  [Fairlight  2025-01-01  37]
-   19. The Raster Bar  [Fairlight  2024-01-01  37]
-   20. Xmas 2024  [Fairlight  2024-01-01  37]
 
-  Showing 1-20 of 50  |  n/→=next  p/←=prev  q=quit
-
-  Enter number to view details: 1
+  Showing 1-18 of 50  |  u/^=up  n/->=next
+  Number to select,  r=rename  d=delete  q=quit: 1
 --------------------------------------------------------------
   Qdor Qdor
 --------------------------------------------------------------
@@ -178,33 +156,30 @@ sid@sid-macbookprom4 run % ./assembly64.py search --group fairlight --cat demos 
   Files:
       1. qdor-qdor-75db9b39.d64  (174,848 bytes)
 
-  [1] Run on Ultimate (192.168.2.32)
+  [1] Run on Ultimate (192.168.2.64)
   [2] Download to current directory
   [3] Quit
 
-  Choose action (or Enter to quit):               
-  
+  Choose action (or Enter to quit): 3  
 $
 ```
 ## Example: directly downloading Qdor Qdor, the demo we found in the prevous example
 ```
-$ ./assembly64.py search "qdor qdor" --download                    
+$ ./assembly64.py search "qdor qdor" --download 
 
   1 match(es):
 
     1. Qdor Qdor
 
-  Showing 1-1 of 1
-
-  Enter number to get details: 1
+  Showing 1-1 of 1  |  u/^=up
+  Number to select,  r=rename  d=delete  q=quit: 1
 
   1 result(s):
 
     1. Qdor Qdor  [Fairlight  2026-02-13  1 (demos)]
 
-  Showing 1-1 of 1
-
-  Enter number to view details: 1
+  Showing 1-1 of 1  |  u/^=up
+  Number to select,  r=rename  d=delete  q=quit: 1
 --------------------------------------------------------------
   Qdor Qdor
 --------------------------------------------------------------
@@ -215,13 +190,22 @@ $ ./assembly64.py search "qdor qdor" --download
   Year:            2026
   Released:        2026-02-13
 --------------------------------------------------------------
+
+  Download to:
+  [1] Demos dir (/home/idun/demos)
+  [2] Browse local filesystem
+  [3] Current directory
+  [4] Create folder: qdor-qdor/
+
+  Choose (or Enter for current directory): 4
+  Created folder: qdor-qdor/
   Downloading qdor-qdor-75db9b39.d64 ... done  (174,848 bytes)
-  Saved  ->  qdor-qdor-75db9b39.d64
+  Saved  ->  qdor-qdor/qdor-qdor-75db9b39.d64
 $ 
 ```
 ## Example: Searching the demo charts and running a multi-disk demo from the IDUN cartridge 
 ```
-idun  demos $ assembly64 charts
+$ ./assembly64.py charts
 --------------------------------------------------------------
   AVAILABLE CHARTS
 --------------------------------------------------------------
@@ -308,5 +292,191 @@ idun  demos $ assembly64 charts
   Mounting fairlight-1337-58679b69-c.d64 on drive A: ... done  (200)
 
   All disks played.
-idun  demos $ 
+$ 
+```
+## Using the remote fole browser to upload a directory to the Ultimate file system
+```
+$ assembly64 remote
+--------------------------------------------------------------
+  Ultimate-64-II-439E67: /
+--------------------------------------------------------------
+    1. [DIR]  SD/
+    2. [DIR]  Flash/
+    3. [DIR]  Temp/
+    4. [DIR]  USB0/
+
+  Showing 1-4 of 4  |
+  Number to select,  u=upload  q=quit: 1
+
+  Selected: /SD/
+  45 dirs, 8 files, ~578 KB shown
+
+  [1] Enter directory
+  [2] Download all
+  [3] Go back
+
+  Choose: 1
+--------------------------------------------------------------
+  Ultimate-64-II-439E67: /SD/
+--------------------------------------------------------------
+    1. [DIR]  #/
+    2. [DIR]  _arm2sid/
+    3. [DIR]  _BASIC/
+    4. [DIR]  _bbs/
+    5. [DIR]  _carts/
+    6. [DIR]  _D81/
+    7. [DIR]  _demos/
+    8. [DIR]  _favs/
+    9. [DIR]  _G64/
+   10. [DIR]  _GEOS/
+   11. [DIR]  _Kawari/
+   12. [DIR]  _music/
+   13. [DIR]  _Pocketwriter64/
+   14. [DIR]  _reu_nuvies/
+   15. [DIR]  _tape/
+   16. [DIR]  _tools/
+   17. [DIR]  _Ultimate64/
+   18. [DIR]  _updates/
+   19. [DIR]  _vic20/
+
+  Showing 1-53 of 53  |  ^=up
+  Number to select,  m=mkdir  r=rename  d=delete  u=upload  q=quit: u
+
+  Upload:
+  [1] Enter local path
+  [2] Browse local filesystem
+
+  Choose: 2
+--------------------------------------------------------------
+  Local: /home/idun
+--------------------------------------------------------------
+    1. [DIR]  code/
+    2. [DIR]  demos/
+    3. [DIR]  games/
+    4. [DIR]  idun-base/
+    5. [DIR]  idun-sys/
+    6. [DIR]  pics/
+    7. [DIR]  sids/
+
+  Showing 1-39 of 39  |  ^=up
+  Number to select,  m=mkdir  r=rename  d=delete  q=quit: 2
+
+  Selected: demos/
+  8 dirs, 46 files, ~4.1 MB
+
+  [1] Enter directory
+  [2] Upload all to /SD/
+  [3] Go back
+
+  Choose: 1
+--------------------------------------------------------------
+  Local: /home/idun/demos
+--------------------------------------------------------------
+    1. [DIR]  edge-of-disgrace/
+    2. [DIR]  grey/
+    3. [DIR]  lifecycle/
+    4. [DIR]  next-level/
+    5. [DIR]  nine/
+    6. [DIR]  signal-carnival/
+    7. [DIR]  sonic-the-hedgehog-v12-5/
+    8. [DIR]  wonderland-xiii/
+    9. amiga-intro.prg  (6,912 bytes)
+   10. CopperBooze.prg  (19,593 bytes)
+   11. flip-info.txt.bak  (98 bytes)
+   12. pac_grey.prg  (38,150 bytes)
+   13. rfovdc2.d64  (174,848 bytes)
+   14. scanandspin.d64  (174,848 bytes)
+
+  Showing 1-14 of 14  |  ^=up
+  Number to select,  m=mkdir  r=rename  d=delete  q=quit: 2
+
+  Selected: grey/
+  3 files, 43 KB
+
+  [1] Enter directory
+  [2] Upload all to /SD/
+  [3] Go back
+
+  Choose: 2
+  Uploading grey/ -> /SD/grey/ ...
+    grey/pac_grey.prg ... done (38,150 bytes)
+    grey/walking_in_the_sunshine.prg ... done (4,096 bytes)
+    grey/walking_in_the_sunshine.sid ... done (1,558 bytes)
+  Done.
+--------------------------------------------------------------
+  Local: /home/idun/demos
+--------------------------------------------------------------
+    1. [DIR]  edge-of-disgrace/
+    2. [DIR]  grey/
+    3. [DIR]  lifecycle/
+    4. [DIR]  next-level/
+    5. [DIR]  nine/
+    6. [DIR]  signal-carnival/
+    7. [DIR]  sonic-the-hedgehog-v12-5/
+    8. [DIR]  wonderland-xiii/
+    9. amiga-intro.prg  (6,912 bytes)
+   10. CopperBooze.prg  (19,593 bytes)
+   11. flip-info.txt.bak  (98 bytes)
+   12. pac_grey.prg  (38,150 bytes)
+   13. rfovdc2.d64  (174,848 bytes)
+   14. scanandspin.d64  (174,848 bytes)
+
+  Showing 1-14 of 14  |  ^=up
+  Number to select,  m=mkdir  r=rename  d=delete  q=quit: q
+--------------------------------------------------------------
+  Ultimate-64-II-439E67: /SD/
+--------------------------------------------------------------
+    1. [DIR]  #/
+    2. [DIR]  _arm2sid/
+    3. [DIR]  _BASIC/
+    4. [DIR]  _bbs/
+    5. [DIR]  _carts/
+    6. [DIR]  _D81/
+    7. [DIR]  _demos/
+    8. [DIR]  _favs/
+    9. [DIR]  _G64/
+   10. [DIR]  _GEOS/
+   11. [DIR]  _Kawari/
+   12. [DIR]  _music/
+   13. [DIR]  _Pocketwriter64/
+   14. [DIR]  _reu_nuvies/
+   15. [DIR]  _tape/
+   16. [DIR]  _tools/
+   17. [DIR]  _Ultimate64/
+   18. [DIR]  _updates/
+   19. [DIR]  _vic20/
+   20. [DIR]  grey/
+
+  Showing 1-54 of 54  |  ^=up
+  Number to select,  m=mkdir  r=rename  d=delete  u=upload  q=quit: d
+  Number to delete: 20
+  /SD/grey/ is not empty (3 items).
+  Delete recursively? [y/N]: y
+  Done.
+--------------------------------------------------------------
+  Ultimate-64-II-439E67: /SD/
+--------------------------------------------------------------
+    1. [DIR]  #/
+    2. [DIR]  _arm2sid/
+    3. [DIR]  _BASIC/
+    4. [DIR]  _bbs/
+    5. [DIR]  _carts/
+    6. [DIR]  _D81/
+    7. [DIR]  _demos/
+    8. [DIR]  _favs/
+    9. [DIR]  _G64/
+   10. [DIR]  _GEOS/
+   11. [DIR]  _Kawari/
+   12. [DIR]  _music/
+   13. [DIR]  _Pocketwriter64/
+   14. [DIR]  _reu_nuvies/
+   15. [DIR]  _tape/
+   16. [DIR]  _tools/
+   17. [DIR]  _Ultimate64/
+   18. [DIR]  _updates/
+   19. [DIR]  _vic20/
+
+  Showing 1-53 of 53  |  ^=up
+  Number to select,  m=mkdir  r=rename  d=delete  u=upload  q=quit: q
+$
 ```
