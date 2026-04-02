@@ -1,7 +1,7 @@
 # assembly64_cli
 A command-line C64 scene lookup tool for the 1541 Ultimate II/II+L, Ultimate64/Ultimate64 Elite II, & Commodore 64 Ultimate powered by the [Assembly64 API](https://hackerswithstyle.se/leet/swagger-ui) & the [Ultimate 64 API](https://1541u-documentation.readthedocs.io/en/latest/api/api_calls.html).
-### [Code notes](code_notes.md)
-### [Examples](README.md#Examples)
+### - [Code notes](code_notes.md)
+### - [Examples](https://github.com/sidchoudhuri/assembly64_cli/blob/main/README.md#examples-1)
 
 ## Setup
 
