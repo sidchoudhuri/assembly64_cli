@@ -1428,26 +1428,105 @@ def cmd_categories(args):
 
     chosen_cat = cats[idx]
     cat_name   = chosen_cat["description"]
+    cat_aql    = chosen_cat["name"]
 
-    # Ask for optional search term
-    print()
-    term = input(f"  Search in {cat_name} (or Enter for all): ").strip()
+    # AQL query builder
+    filters = {}  # key -> (aql_field, value)
 
-    # Build AQL query
-    query_parts = [f"category:{chosen_cat['name']}"]
-    if term:
-        query_parts.append(f"name:{term}")
-    query = " ".join(query_parts)
+    def build_cat_query():
+        parts = [f"category:{cat_aql}"]
+        for field, val in filters.items():
+            parts.append(f"{field}:{q_val(val)}")
+        return " ".join(parts)
 
-    print(f"  Searching {cat_name} ...", flush=True)
-    items = aql(query, limit=50)
-    if not items:
-        print("  No results.")
-        return
+    def show_query():
+        q = build_cat_query()
+        print(f"\n  {cat_name}")
+        print(f"  Query: {q}")
 
-    # Sort by rating descending
-    items.sort(key=lambda x: float(x.get("siteRating") or x.get("rating") or 0), reverse=True)
-    pick(items, run_ip=run_ip, download=download)
+    while True:
+        show_query()
+        print(f"  n=name  h=handle  g=group")
+        print(f"  a=after  b=before  o=order  c=clear")
+        print(f"  Enter=search  q=quit")
+        key = input("  Filter: ").strip().lower()
+
+        if key == "q":
+            return
+        elif key == "c":
+            filters = {}
+            continue
+        elif key == "n":
+            val = input("  Name: ").strip()
+            if val: filters["name"] = val
+        elif key == "h":
+            val = input("  Handle: ").strip()
+            if val: filters["handle"] = val
+        elif key == "g":
+            val = input("  Group: ").strip()
+            if val: filters["group"] = val
+        elif key == "a":
+            val = input("  After (YYYYMMDD): ").strip()
+            if val: filters["date:>"] = val
+        elif key == "b":
+            val = input("  Before (YYYYMMDD): ").strip()
+            if val: filters["date:<"] = val
+        elif key == "o":
+            print("  [1] Rating (default)")
+            print("  [2] Newest first")
+            print("  [3] Oldest first")
+            oc = input("  Order: ").strip()
+            if oc == "1":   filters.pop("order", None)
+            elif oc == "2": filters["order"] = "date_desc"
+            elif oc == "3": filters["order"] = "date_asc"
+        elif key == "":
+            # Search with pagination
+            query   = build_cat_query()
+            offset  = 0
+            limit   = 50
+            total   = None
+
+            while True:
+                print(f"  Searching ...", flush=True)
+                items = aql(query, offset=offset, limit=limit)
+                if not items:
+                    if offset == 0:
+                        print("  No results.")
+                    else:
+                        print("  No more results.")
+                    break
+
+                # Client-side sort by rating unless order filter set
+                if "order" not in filters:
+                    items.sort(key=lambda x: float(x.get("siteRating") or x.get("rating") or 0), reverse=True)
+
+                shown = offset + len(items)
+                has_more = len(items) == limit
+
+                print(f"\n  Query: {query}")
+                print(f"  Showing {offset+1}-{shown}" + (" (more available)" if has_more else ""))
+                print()
+                print(f"  [1] View results")
+                if has_more:
+                    print(f"  [2] Next {limit} ->")
+                if offset > 0:
+                    print(f"  [3] <- Prev {limit}")
+                print(f"  [4] Refine query")
+                print(f"  q=quit")
+                print()
+                ch = input("  Choose: ").strip().lower()
+
+                if ch == "q":
+                    return
+                elif ch == "1":
+                    pick(items, run_ip=run_ip, download=download)
+                elif ch == "2" and has_more:
+                    offset += limit
+                elif ch == "3" and offset > 0:
+                    offset = max(0, offset - limit)
+                elif ch == "4":
+                    break  # back to filter loop
+                # else loop
 
 
 def parse_flip_file(path):
@@ -2868,7 +2947,7 @@ def build_parser():
     pr = sub.add_parser("presets", help="Browse AQL query presets")
     pr.add_argument("name", nargs="?", metavar="TYPE")
 
-    ca = sub.add_parser("cats", help="Browse categories")
+    ca = sub.add_parser("cats", aliases=["cat", "category"], help="Browse categories")
     ca.add_argument("--download", action="store_true")
     ca.add_argument("--run",      metavar="IP")
 
@@ -2966,7 +3045,7 @@ def main():
         cmd_charts(args)
     elif args.cmd == "presets":
         cmd_presets(args)
-    elif args.cmd == "cats":
+    elif args.cmd in ("cats", "cat", "category"):
         cmd_categories(args)
     elif args.cmd == "run":
         cmd_run(args)
