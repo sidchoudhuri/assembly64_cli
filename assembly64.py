@@ -1450,8 +1450,8 @@ def cmd_pull(args):
 
 
 def cmd_push(args):
-    """Upload a local file to the Ultimate USB stick."""
-    import subprocess
+    """Upload a local file to the Ultimate."""
+    import subprocess, glob
     cfg = load_config()
     ip  = args.ip or cfg.get("ultimate_ip", "")
     if not ip:
@@ -1460,7 +1460,6 @@ def cmd_push(args):
             print("  No IP given.")
             return
 
-    import glob
     local_arg = args.local
     local_files = [f for f in glob.glob(local_arg) if os.path.isfile(f)] \
                   if ("*" in local_arg or "?" in local_arg) else [local_arg]
@@ -1477,22 +1476,162 @@ def cmd_push(args):
         if ans != "y":
             return
 
+    # If no remote given, browse to pick destination
+    if not args.remote:
+        info = None
+        try:
+            req  = urllib.request.Request(f"http://{ip}/v1/info")
+            with urllib.request.urlopen(req, timeout=5) as r:
+                info = json.loads(r.read().decode("utf-8"))
+        except Exception:
+            pass
+        hostname = info.get("hostname", ip) if info else ip
+        print(f"  Browse to destination (Enter=select current dir, q=cancel):")
+
+        while True:
+            remote_dir = ls_browse_pick_dir(ip, hostname)
+            if remote_dir is None:
+                print("  Cancelled.")
+                return
+
+            for local in local_files:
+                if not os.path.isfile(local):
+                    print(f"  File not found: {local}")
+                    continue
+                filename = os.path.basename(local)
+                remote   = f"{remote_dir}/{filename}" if remote_dir else filename
+                remote   = remote.lstrip("/")
+                url      = ftp_url(ip, remote)
+                size = os.path.getsize(local)
+                print(f"  Pushing {local} ({size:,} bytes) -> /{remote} ...")
+                result = subprocess.run(["curl", "-s", "-T", local, url],
+                                        capture_output=True, text=True)
+                if result.returncode == 0:
+                    print(f"  Done.")
+                else:
+                    print(f"  FAILED: {result.stderr.strip() or 'unknown error'}")
+
+            # Drop into full ls browser at the destination
+            ls_browse(ip, hostname, remote_dir + "/", run_ip=ip)
+            return
+
     for local in local_files:
         if not os.path.isfile(local):
             print(f"  File not found: {local}")
             continue
         filename = os.path.basename(local)
-        remote   = args.remote.rstrip("/") + "/" + filename if args.remote else filename
+        remote   = f"{remote_dir}/{filename}" if remote_dir else filename
         remote   = remote.lstrip("/")
         url      = ftp_url(ip, remote)
         size = os.path.getsize(local)
-        print(f"  Pushing {local} ({size:,} bytes) -> {remote} ...")
+        print(f"  Pushing {local} ({size:,} bytes) -> /{remote} ...")
         result = subprocess.run(["curl", "-s", "-T", local, url], capture_output=True, text=True)
         if result.returncode == 0:
             print(f"  Done.")
         else:
             print(f"  FAILED: {result.stderr.strip() or 'unknown error'}")
 
+
+def ls_browse_pick_dir(ip, hostname):
+    """Browse the Ultimate filesystem directories.
+    Returns chosen directory path string, or None if cancelled.
+    Enter with no number = select current directory.
+    q at root = cancel.
+    """
+    import subprocess
+    path = "/"
+
+    while True:
+        had_trailing = path.endswith("/")
+        path = "/".join(p for p in path.split("/") if p)
+        if had_trailing and path:
+            path += "/"
+        list_path = path.rstrip("/")
+
+        all_entries = ls_list(ip, list_path) or []
+        dirs  = [(n, d, s) for n, d, s in all_entries if d]
+        files = [(n, d, s) for n, d, s in all_entries if not d]
+
+        rows = []
+        for i, (n, d, s) in enumerate(dirs, 1):
+            rows.append(f"  {i:>3}. [DIR]  {n}/")
+
+        display_path = f"/{list_path}/" if list_path else "/"
+        header(f"{hostname}: {display_path}")
+        print(f"  Enter=upload here")
+
+        can_modify = bool(list_path)
+        idx = paginated_list(rows, "Number to descend", can_mkdir=can_modify, can_modify=can_modify)
+
+        if idx is None:
+            # Enter = select current directory
+            return list_path
+
+        if idx == "up":
+            if not list_path:
+                return None  # q at root = cancel
+            list_path = "/".join(list_path.split("/")[:-1])
+            path = list_path + "/" if list_path else "/"
+            continue
+
+        if idx == "mkdir":
+            dirname = input("  New directory name: ").strip()
+            if dirname:
+                if any(n == dirname and d for n, d, _ in all_entries):
+                    print(f"  Already exists: {dirname}/")
+                else:
+                    new_path = f"{list_path}/{dirname}" if list_path else dirname
+                    url = ftp_url(ip, new_path + "/")
+                    res = subprocess.run(["curl", "-s", "--ftp-create-dirs", url],
+                                         capture_output=True, text=True)
+                    if res.returncode == 0:
+                        print(f"  Created: /{new_path}/")
+                        path = new_path + "/"
+                    else:
+                        print(f"  FAILED: {res.stderr.strip() or 'unknown error'}")
+            continue
+
+        if idx == "rename":
+            num = input("  Number to rename: ").strip()
+            try:
+                entry_name, _, _ = dirs[int(num) - 1]
+            except (ValueError, IndexError):
+                print("  Invalid number.")
+                continue
+            new_name = input(f"  Rename '{entry_name}' to: ").strip()
+            if new_name:
+                old_path = f"{list_path}/{entry_name}" if list_path else entry_name
+                new_path = f"{list_path}/{new_name}" if list_path else new_name
+                ok, err = ftp_rename(ip, old_path, new_path)
+                print("  Done." if ok else f"  FAILED: {err or 'unknown error'}")
+            continue
+
+        if idx == "delete":
+            num = input("  Number to delete: ").strip()
+            try:
+                entry_name, entry_is_dir, _ = dirs[int(num) - 1]
+            except (ValueError, IndexError):
+                print("  Invalid number.")
+                continue
+            del_path = f"{list_path}/{entry_name}" if list_path else entry_name
+            contents = ls_list(ip, del_path) or []
+            if contents:
+                print(f"  /{del_path}/ is not empty ({len(contents)} items).")
+                ans = input(f"  Delete recursively? [y/N]: ").strip().lower()
+                if ans == "y":
+                    ok, err = ftp_delete_recursive(ip, del_path)
+                    print("  Done." if ok else f"  FAILED: {err or 'unknown error'}")
+            else:
+                ans = input(f"  Delete /{del_path}/? [y/N]: ").strip().lower()
+                if ans == "y":
+                    ok, err = ftp_delete(ip, del_path, is_dir=True)
+                    print("  Done." if ok else f"  FAILED: {err or 'unknown error'}")
+            continue
+
+        # Navigate into selected directory
+        name, _, _ = dirs[idx]
+        base = list_path.rstrip("/")
+        path = f"{base}/{name}/" if base else f"{name}/"
 
 def ls_list(ip, remote):
     """Fetch and parse an FTP directory listing. Returns list of (name, is_dir, size).
