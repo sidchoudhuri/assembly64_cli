@@ -115,7 +115,8 @@ EXAMPLES
   assembly64 config --remove U2L
 $
   ```
-## Example: looking up the first 50 demos from Fairlight in descending order (newest first)
+## Examples
+### Looking up the first 50 demos from Fairlight in descending order (newest first)
 ```
 $ ./assembly64.py search --group fairlight --cat demos --order desc
 
@@ -163,7 +164,7 @@ $ ./assembly64.py search --group fairlight --cat demos --order desc
   Choose action (or Enter to quit): 3  
 $
 ```
-## Example: directly downloading Qdor Qdor, the demo we found in the prevous example
+##$ Directly downloading Qdor Qdor, the demo we found in the prevous example
 ```
 $ ./assembly64.py search "qdor qdor" --download 
 
@@ -203,7 +204,7 @@ $ ./assembly64.py search "qdor qdor" --download
   Saved  ->  qdor-qdor/qdor-qdor-75db9b39.d64
 $ 
 ```
-## Example: Searching the demo charts and running a multi-disk demo from the IDUN cartridge 
+### Searching the demo charts and running a multi-disk demo using automatic disk swap timings 
 ```
 $ ./assembly64.py charts
 --------------------------------------------------------------
@@ -294,7 +295,7 @@ $ ./assembly64.py charts
   All disks played.
 $ 
 ```
-## Using the remote fole browser to upload a directory to the Ultimate file system
+## Using the Remote File Browser to upload a directory to the Ultimate file system
 ```
 $ assembly64 remote
 --------------------------------------------------------------
@@ -479,4 +480,112 @@ $ assembly64 remote
   Showing 1-53 of 53  |  ^=up
   Number to select,  m=mkdir  r=rename  d=delete  u=upload  q=quit: q
 $
+```
+## Interactively building a search query in the Category Browser
+```
+$ assembly64 cats
+--------------------------------------------------------------
+  CATEGORIES
+--------------------------------------------------------------
+    1. c64com  (2 categories)
+    2. c64orgintro  (1 categories)
+    3. commodore  (5 categories)
+    4. csdb  (12 categories)
+    5. gamebase  (1 categories)
+    6. guybrush  (7 categories)
+    7. hvsc  (4 categories)
+    8. mayhem  (1 categories)
+    9. oneload  (1 categories)
+   10. pres  (2 categories)
+   11. seuck  (1 categories)
+   12. tapes  (1 categories)
+   13. utape  (1 categories)
+--------------------------------------------------------------
+
+  Enter number to browse category type (or Enter to quit): 4
+--------------------------------------------------------------
+    csdb
+--------------------------------------------------------------
+    1. [  0]  CSDB games  (games)
+    2. [  1]  CSDB demos  (demos)
+    3. [  2]  CSDB 128  (c128stuff)
+    4. [  3]  CSDB graphics  (graphics)
+    5. [  4]  CSDB music  (music)
+    6. [  5]  CSDB discmags  (discmags)
+    7. [  6]  CSDB bbs  (bbs)
+    8. [  7]  CSDB misc  (c64misc)
+    9. [  8]  CSDB tools  (tools)
+   10. [  9]  CSDB charts  (charts)
+   11. [ 10]  CSDB easyflash  (easyflash)
+   12. [ 25]  CSDB reu  (reu)
+
+  Showing 1-12 of 12  |
+  Number to select,  q=quit: 4
+
+  CSDB graphics
+  Query: category:graphics
+  n=name  h=handle  g=group
+  a=after  b=before  o=order  c=clear
+  Enter=search  q=quit
+  Filter: g
+  Group: m0nde
+
+  CSDB graphics
+  Query: category:graphics group:m0nde
+  n=name  h=handle  g=group
+  a=after  b=before  o=order  c=clear
+  Enter=search  q=quit
+  Filter: 
+  Searching ...
+
+  Query: category:graphics group:m0nde
+  Showing 1-1
+
+  [1] View results
+  [4] Refine query
+  q=quit
+
+  Choose: 1
+
+  1 result(s):
+
+    1. Me  [m0nde  2024-11-06  3 (graphics)]
+
+  Showing 1-1 of 1  |
+  Number to select,  q=quit: 1
+--------------------------------------------------------------
+  Me
+--------------------------------------------------------------
+  ID:              247364
+  Category:        3 (graphics)
+  Group:           m0nde
+  Year:            2024
+  Released:        2024-11-06
+--------------------------------------------------------------
+
+  Files:
+      1. me.d64  (174,848 bytes)
+
+  [1] Run on Ultimate (192.168.2.64)
+  [2] Download to current directory
+  [3] Quit
+
+  Choose action (or Enter to quit): 1
+  Downloading me.d64 ... done  (174,848 bytes)
+  Uploading and mounting me.d64 ... done  -> /Temp/temp0006
+  Resetting machine ... done
+  Injecting LOAD"*",8,1 + RUN ...
+  Waiting for load to complete ... done  (3110)
+  Load detection took 4.2s
+  Searching ...
+
+  Query: category:graphics group:m0nde
+  Showing 1-1
+
+  [1] View results
+  [4] Refine query
+  q=quit
+
+  Choose: q 
+$ 
 ```
