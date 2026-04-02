@@ -1495,10 +1495,13 @@ def cmd_push(args):
 
 
 def ls_list(ip, remote):
-    """Fetch and parse an FTP directory listing. Returns list of (name, is_dir, size)."""
+    """Fetch and parse an FTP directory listing. Returns list of (name, is_dir, size).
+    Returns None if the path doesn't exist or can't be listed."""
     import subprocess
     url    = ftp_url(ip, remote if remote.endswith("/") else remote + "/")
     result = subprocess.run(["curl", "-s", url], capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
     entries = []
     for line in result.stdout.strip().splitlines():
         parts = line.split(None, 8)
@@ -1522,24 +1525,47 @@ def ls_browse(ip, hostname, start_path, run_ip=None):
         if had_trailing and path:
             path += "/"
         pattern   = None
-        list_path = path
+        list_path = path.rstrip("/")  # use without trailing slash for path construction
 
         if path and not path.endswith("/"):
             entries = ls_list(ip, path)
-            if not entries:
+            if entries is None or (entries == [] and not path.endswith("/")):
+                # Not a directory — treat last component as prefix filter
                 parent  = "/".join(path.split("/")[:-1])
                 prefix  = path.split("/")[-1].lower()
                 pattern = prefix + "*"
                 list_path = parent
-                entries = ls_list(ip, list_path)
+                entries = ls_list(ip, list_path) or []
                 entries = [(n, d, s) for n, d, s in entries
                            if fnmatch.fnmatch(n.lower(), pattern)]
         else:
-            entries = ls_list(ip, list_path)
+            entries = ls_list(ip, list_path) or []
+
+        if entries is None:
+            print(f"  Not found: /{list_path}")
+            return
 
         if not entries:
-            print(f"  Empty or not found: /{list_path}")
-            return
+            print(f"  (empty directory)")
+            # Still show the prompt so user can go up or mkdir
+            display_path = f"/{list_path}/" if list_path else "/"
+            header(f"{hostname}: {display_path}")
+            print(f"  (empty)")
+            idx = paginated_list([], "Number to select", can_mkdir=bool(list_path), can_modify=bool(list_path))
+            if idx is None:
+                return
+            if idx == "up":
+                list_path = "/".join(list_path.rstrip("/").split("/")[:-1])
+                path = list_path + "/" if list_path else ""
+            elif idx == "mkdir":
+                dirname = input("  New directory name: ").strip()
+                if dirname:
+                    new_path = f"{list_path}/{dirname}" if list_path else dirname
+                    url = ftp_url(ip, new_path + "/")
+                    res = subprocess.run(["curl", "-s", "--ftp-create-dirs", url],
+                                         capture_output=True, text=True)
+                    print(f"  Created: /{new_path}/" if res.returncode == 0 else f"  FAILED")
+            continue
 
         dirs  = [(n, d, s) for n, d, s in entries if d]
         files = [(n, d, s) for n, d, s in entries if not d]
@@ -1600,7 +1626,7 @@ def ls_browse(ip, hostname, start_path, run_ip=None):
             del_path = f"{list_path}/{entry_name}" if list_path else entry_name
             label = f"/{del_path}/" if entry_is_dir else f"/{del_path}"
             if entry_is_dir:
-                contents = ls_list(ip, del_path)
+                contents = ls_list(ip, del_path) or []
                 if contents:
                     print(f"  {label} is not empty ({len(contents)} items).")
                     ans = input(f"  Delete recursively? [y/N]: ").strip().lower()
@@ -1741,7 +1767,7 @@ def cmd_mkdir(args):
 def ftp_delete_recursive(ip, path):
     """Recursively delete a directory and all its contents via FTP."""
     import subprocess
-    entries = ls_list(ip, path)
+    entries = ls_list(ip, path) or []
     for name, is_dir, _ in entries:
         child = f"{path.rstrip('/')}/{name}"
         if is_dir:
