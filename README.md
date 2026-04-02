@@ -1,6 +1,7 @@
 # assembly64_cli
 A command-line C64 scene lookup tool for the 1541 Ultimate II/II+L, Ultimate64/Ultimate64 Elite II, & Commodore 64 Ultimate powered by the [Assembly64 API](https://hackerswithstyle.se/leet/swagger-ui) & the [Ultimate 64 API](https://1541u-documentation.readthedocs.io/en/latest/api/api_calls.html).
 ### [Code notes](code_notes.md)
+### [Examples](README.md#Examples)
 
 ## Setup
 
@@ -116,10 +117,12 @@ EXAMPLES
 $
   ```
 ## Examples
-### Looking up the first 50 demos from Fairlight in descending order (newest first)
-```
-$ ./assembly64.py search --group fairlight --cat demos --order desc
 
+### Looking up the first 50 demos from Fairlight in descending order (newest first)
+<details>
+  <summary>$ ./assembly64.py search --group fairlight --cat demos --order desc</summary>
+  
+```
   50 result(s):
 
     1. Qdor Qdor  [Fairlight  2026-02-13  1 (demos)]
@@ -164,10 +167,13 @@ $ ./assembly64.py search --group fairlight --cat demos --order desc
   Choose action (or Enter to quit): 3  
 $
 ```
-##$ Directly downloading Qdor Qdor, the demo we found in the prevous example
-```
-$ ./assembly64.py search "qdor qdor" --download 
+</details>
 
+### Directly downloading Qdor Qdor, the demo we found in the prevous example
+<details>
+  <summary>$ ./assembly64.py search "qdor qdor" --download </summary>
+  
+```
   1 match(es):
 
     1. Qdor Qdor
@@ -204,9 +210,13 @@ $ ./assembly64.py search "qdor qdor" --download
   Saved  ->  qdor-qdor/qdor-qdor-75db9b39.d64
 $ 
 ```
+</details>
+
 ### Searching the demo charts and running a multi-disk demo using automatic disk swap timings 
+<details>
+  <summary>$ ./assembly64.py charts</summary>
+  
 ```
-$ ./assembly64.py charts
 --------------------------------------------------------------
   AVAILABLE CHARTS
 --------------------------------------------------------------
@@ -295,9 +305,13 @@ $ ./assembly64.py charts
   All disks played.
 $ 
 ```
-## Using the Remote File Browser to upload a directory to the Ultimate file system
+</details>
+
+### Using the Remote File Browser to upload a directory to the Ultimate file system
+<details>
+  <summary>$ assembly64 remote</summary>
+  
 ```
-$ assembly64 remote
 --------------------------------------------------------------
   Ultimate-64-II-439E67: /
 --------------------------------------------------------------
@@ -481,9 +495,14 @@ $ assembly64 remote
   Number to select,  m=mkdir  r=rename  d=delete  u=upload  q=quit: q
 $
 ```
-## Interactively building a search query in the Category Browser
+</details>
+
+### Interactively building a search query in the Category Browser
+
+<details>
+  <summary>$ assembly64 cats</summary>
+  
 ```
-$ assembly64 cats
 --------------------------------------------------------------
   CATEGORIES
 --------------------------------------------------------------
@@ -589,3 +608,4 @@ $ assembly64 cats
   Choose: q 
 $ 
 ```
+</details>
