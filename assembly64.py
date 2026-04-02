@@ -85,13 +85,13 @@ def aql(query, offset=0, limit=50):
     qs = urllib.parse.urlencode({"query": query})
     return get(f"search/aql/{offset}/{limit}?{qs}")
 
+_cols, _rows = 80, 25
+PAGE_SIZE = 20
 try:
-    import os as _os
-    _cols, _rows = _os.get_terminal_size()
+    _cols, _rows = os.get_terminal_size()
     PAGE_SIZE = max(5, _rows - 7)
 except Exception:
-    _cols, _rows = 80, 25
-    PAGE_SIZE = 20
+    pass
 
 C64_TERMINAL = _cols <= 40
 
@@ -444,7 +444,7 @@ def browse_local_dir():
         print()
         header(f"Local: {path}")
         print(f"  Enter=select this directory")
-        idx = paginated_list(rows, "Number to descend", can_mkdir=True, can_modify=path != os.path.dirname(path))
+        idx = paginated_list(rows, "Number to descend", can_mkdir=True, can_modify=path != os.path.dirname(path), can_upload=False)
         if idx is None:
             return path
         if idx == "up":
@@ -460,10 +460,214 @@ def browse_local_dir():
                 print(f"  Created: {new_path}/")
                 path = new_path
             continue
-        if idx in ("rename", "delete"):
+        if idx in ("rename", "delete", "upload"):
             continue
         if 0 <= idx < len(entries):
             path = os.path.join(path, entries[idx])
+
+
+def local_browse(remote_ip, remote_path, hostname):
+    """Full local filesystem browser with upload capability.
+    remote_path is the current remote directory to upload into."""
+    import subprocess, shutil
+
+    path = os.getcwd()
+
+    while True:
+        # Build listing
+        try:
+            raw = sorted(os.listdir(path), key=str.lower)
+        except PermissionError:
+            print(f"  Permission denied: {path}")
+            path = os.path.dirname(path)
+            continue
+
+        dirs  = [(e, True,  0)                          for e in raw if os.path.isdir(os.path.join(path, e))]
+        files = [(e, False, os.path.getsize(os.path.join(path, e)))
+                 for e in raw if os.path.isfile(os.path.join(path, e))]
+        all_entries = dirs + files
+
+        rows = []
+        for i, (name, is_dir, sz) in enumerate(all_entries, 1):
+            if is_dir:
+                rows.append(f"  {i:>3}. [DIR]  {name}/")
+            else:
+                rows.append(f"  {i:>3}. {name}  ({sz:,} bytes)")
+
+        can_modify = path != os.path.dirname(path)
+        header(f"Local: {path}")
+        idx = paginated_list(rows, "Number to select",
+                             can_mkdir=can_modify, can_modify=can_modify,
+                             can_upload=False)
+
+        if idx is None:
+            return
+        if idx == "up":
+            parent = os.path.dirname(path)
+            if parent != path:
+                path = parent
+            continue
+        if idx == "mkdir":
+            dirname = input("  New directory name: ").strip()
+            if dirname:
+                new_path = os.path.join(path, dirname)
+                os.makedirs(new_path, exist_ok=True)
+                print(f"  Created: {new_path}/")
+            continue
+        if idx == "rename":
+            num = input("  Number to rename: ").strip()
+            try:
+                entry_name, _, _ = all_entries[int(num) - 1]
+            except (ValueError, IndexError):
+                print("  Invalid number.")
+                continue
+            new_name = input(f"  Rename '{entry_name}' to: ").strip()
+            if new_name:
+                os.rename(os.path.join(path, entry_name), os.path.join(path, new_name))
+                print(f"  Renamed.")
+            continue
+        if idx == "delete":
+            num = input("  Number to delete: ").strip()
+            try:
+                entry_name, entry_is_dir, _ = all_entries[int(num) - 1]
+            except (ValueError, IndexError):
+                print("  Invalid number.")
+                continue
+            full = os.path.join(path, entry_name)
+            if entry_is_dir:
+                contents = os.listdir(full)
+                if contents:
+                    print(f"  {entry_name}/ has {len(contents)} items.")
+                    ans = input("  Delete recursively? [y/N]: ").strip().lower()
+                    if ans == "y":
+                        shutil.rmtree(full)
+                        print("  Done.")
+                    else:
+                        print("  Cancelled.")
+                else:
+                    ans = input(f"  Delete {entry_name}/? [y/N]: ").strip().lower()
+                    if ans == "y":
+                        os.rmdir(full)
+                        print("  Done.")
+            else:
+                ans = input(f"  Delete {entry_name}? [y/N]: ").strip().lower()
+                if ans == "y":
+                    os.unlink(full)
+                    print("  Done.")
+            continue
+
+        # File or dir selected
+        entry_name, entry_is_dir, entry_size = all_entries[idx]
+        full_local = os.path.join(path, entry_name)
+
+        if entry_is_dir:
+            # Count for info panel
+            file_count = sum(len(_fs) for _, _ds, _fs in os.walk(full_local))
+            dir_count  = sum(len(_ds) for _, _ds, _fs in os.walk(full_local))
+            total_size = sum(
+                os.path.getsize(os.path.join(r, fn))
+                for r, _, _fs in os.walk(full_local) for fn in _fs
+            )
+            mb = total_size / (1024 * 1024)
+            if mb >= 1:
+                size_str = f"~{mb:.1f} MB" if dir_count else f"{mb:.1f} MB"
+            else:
+                kb = total_size / 1024
+                size_str = f"~{kb:.0f} KB" if dir_count else f"{kb:.0f} KB"
+
+            print(f"\n  Selected: {entry_name}/")
+            parts = []
+            if dir_count:  parts.append(f"{dir_count} dirs")
+            parts.append(f"{file_count} files")
+            parts.append(size_str)
+            print(f"  {', '.join(parts)}")
+            print()
+            print(f"  [1] Enter directory")
+            print(f"  [2] Upload all to /{remote_path.strip('/')}/")
+            print(f"  [3] Go back")
+            print()
+            ch = input("  Choose: ").strip()
+            if ch == "2":
+                # Warnings
+                warns = []
+                if dir_count:   warns.append("Has subdirs")
+                if mb >= 50:    warns.append("Very large")
+                if warns:
+                    print(f"  ** {' - '.join(warns)}, true size may be larger")
+                    ans = input("  Upload anyway? [y/N]: ").strip().lower()
+                    if ans != "y":
+                        continue
+                uploads, err = get_upload_files(full_local)
+                if err:
+                    print(f"  {err}")
+                    continue
+                rbase = remote_path.strip("/")
+                print(f"  Uploading {entry_name}/ -> /{rbase}/{entry_name}/ ...")
+                ok = True
+                for local_file, rel_path in uploads:
+                    remote_file = f"{rbase}/{rel_path}" if rbase else rel_path
+                    url = ftp_url(remote_ip, remote_file)
+                    sz  = os.path.getsize(local_file)
+                    print(f"    {rel_path} ...", end=" ", flush=True)
+                    res = subprocess.run(["curl", "-s", "--ftp-create-dirs",
+                                          "-T", local_file, url],
+                                         capture_output=True, text=True)
+                    if res.returncode == 0:
+                        print(f"done ({sz:,} bytes)")
+                    else:
+                        print("FAILED")
+                        ok = False
+                print("  Done." if ok else "  Completed with errors.")
+            elif ch == "1" or not ch:
+                path = full_local
+            continue
+
+        # File selected
+        ext = "." + entry_name.lower().rsplit(".", 1)[-1]
+        print(f"\n  Selected: {entry_name}")
+        options = []
+        if ext in DISK_TYPES or ext in ULTIMATE_RUNNERS:
+            options.append(("run",    "Run on Ultimate (sid player)" if ext == ".sid" else "Run on Ultimate"))
+            if ext in DISK_TYPES:
+                options.append(("mount", "Mount on drive A"))
+        options.append(("upload", f"Upload to /{remote_path.strip('/')}/"))
+        options.append(("back",   "Go back"))
+
+        print()
+        for i, (_, lbl) in enumerate(options, 1):
+            print(f"  [{i}] {lbl}")
+        print()
+        ch = input("  Choose (or Enter to go back): ").strip()
+        if not ch:
+            continue
+        try:
+            key, _ = options[int(ch) - 1]
+        except (ValueError, IndexError):
+            continue
+
+        if key == "back":
+            continue
+        elif key == "run":
+            with open(full_local, "rb") as f:
+                data = f.read()
+            run_on_ultimate(entry_name, data, remote_ip)
+        elif key == "mount":
+            with open(full_local, "rb") as f:
+                data = f.read()
+            mount_disk(remote_ip, entry_name, data)
+        elif key == "upload":
+            rbase = remote_path.strip("/")
+            remote_file = f"{rbase}/{entry_name}" if rbase else entry_name
+            url  = ftp_url(remote_ip, remote_file)
+            sz   = os.path.getsize(full_local)
+            print(f"  Uploading {entry_name} ({sz:,} bytes) ...")
+            res = subprocess.run(["curl", "-s", "--ftp-create-dirs",
+                                  "-T", full_local, url],
+                                 capture_output=True, text=True)
+            if res.returncode == 0:
+                print(f"  Done.")
+            else:
+                print(f"  FAILED: {res.stderr.strip() or 'unknown error'}")
 
 
 def download_file(item_id, cat, f, run_ip=None, target_dir="."):
@@ -913,7 +1117,7 @@ def read_input(prompt):
         return input("").strip()
 
 
-def paginated_list(rows, prompt, can_mkdir=False, can_modify=True):
+def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=False):
     """
     Display a paginated list. 40 char wide C64 screen layout.
     Returns index, None, "up", "mkdir", "rename", or "delete".
@@ -930,7 +1134,7 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=True):
         # Line 1: Showing X-Y of Z | navigation
         nav = []
         if can_modify:
-            nav.append("u/^=up")
+            nav.append("^=up")
         if offset > 0:
             nav.append("p/<-=prev")
         if end < total:
@@ -944,13 +1148,15 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=True):
             if can_mkdir:
                 actions.append("m=mkdir")
             actions += ["r=rename", "d=delete"]
+        if can_upload:
+            actions.append("u=upload")
         actions.append("q=quit")
         actions_str = "  ".join(actions)
         choice = read_input(f"  Number to select,  {actions_str}: ").lower()
 
         if not choice or choice == "q":
             return None
-        if choice in ("up", "u") and can_modify:
+        if choice in ("^", "up") and can_modify:
             return "up"
         if choice == "m" and can_mkdir:
             return "mkdir"
@@ -958,9 +1164,10 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=True):
             return "rename"
         if choice == "d" and can_modify:
             return "delete"
+        if choice == "u" and can_upload:
+            return "upload"
+
         if choice in ("p", "b") or choice == "[D":
-            if offset == 0 and can_modify:
-                return "up"
             offset = max(0, offset - PAGE_SIZE)
             continue
         if choice == "n":
@@ -990,7 +1197,7 @@ def pick(items, run_ip=None, download=False, show_files=False, autodisk=False):
         extra    = "  ".join(filter(None, [credits, date_str, cat]))
         rows.append(f"  {i:>3}. {name}  [{extra}]")
     idx = paginated_list(rows, "Enter number to view details")
-    if idx is None or idx in ("up", "mkdir", "rename", "delete"):
+    if idx is None or idx in ("up", "mkdir", "rename", "delete", "upload"):
         return
     show_item(items[idx], run_ip=run_ip, download=download, show_files=show_files, autodisk=autodisk)
 
@@ -999,7 +1206,7 @@ def pick_name(names, prompt="select"):
     print(f"\n  {len(names)} match(es):\n")
     rows = [f"  {i:>3}. {n}" for i, n in enumerate(names, 1)]
     idx  = paginated_list(rows, f"Enter number to {prompt}")
-    if idx is None or idx in ("up", "mkdir", "rename", "delete"):
+    if idx is None or idx in ("up", "mkdir", "rename", "delete", "upload"):
         return None
     return names[idx]
 
@@ -1010,6 +1217,8 @@ def q_val(s):
 
 def build_query(args):
     parts = []
+    if hasattr(args, "name") and args.name:
+        parts.append(f"name:{q_val(args.name)}")
     if hasattr(args, "group") and args.group:
         parts.append(f"group:{q_val(args.group)}")
     if hasattr(args, "handle") and args.handle:
@@ -1029,7 +1238,6 @@ def build_query(args):
         parts.append(f"order:{args.order}")
     return " ".join(parts)
 
-# ---------- Commands ----------------------------------------------------------
 
 def cmd_search(args):
     run_ip   = getattr(args, "run", None)
@@ -1037,6 +1245,7 @@ def cmd_search(args):
     has_kv   = any([args.group, args.handle, args.repo, args.cat,
                     args.date, args.after, args.before])
 
+    # Name only (no filters) -- use fast name lookup endpoint
     if args.name and not has_kv:
         enc   = urllib.parse.quote(args.name.replace(" ", ""))
         cat   = resolve_cat(args.cat) if args.cat else 1
@@ -1054,7 +1263,8 @@ def cmd_search(args):
         pick(items, run_ip=run_ip, download=download, show_files=args.files, autodisk=getattr(args, "autodisk", False))
         return
 
-    if not has_kv:
+    # Name + filters, or filters only -- use AQL
+    if not args.name and not has_kv:
         print("  Please provide at least one filter or a name to search.")
         return
 
@@ -1217,15 +1427,26 @@ def cmd_categories(args):
         return
 
     chosen_cat = cats[idx]
-    cat_id     = chosen_cat["id"]
     cat_name   = chosen_cat["description"]
 
-    # Search within this category using AQL
-    print(f"\n  Searching {cat_name} ...", flush=True)
-    items = aql(f"category:{chosen_cat['name']}", limit=50)
+    # Ask for optional search term
+    print()
+    term = input(f"  Search in {cat_name} (or Enter for all): ").strip()
+
+    # Build AQL query
+    query_parts = [f"category:{chosen_cat['name']}"]
+    if term:
+        query_parts.append(f"name:{term}")
+    query = " ".join(query_parts)
+
+    print(f"  Searching {cat_name} ...", flush=True)
+    items = aql(query, limit=50)
     if not items:
         print("  No results.")
         return
+
+    # Sort by rating descending
+    items.sort(key=lambda x: float(x.get("siteRating") or x.get("rating") or 0), reverse=True)
     pick(items, run_ip=run_ip, download=download)
 
 
@@ -1697,7 +1918,7 @@ def ls_browse_pick_dir(ip, hostname, suggested_name=None):
         print(f"  Enter=upload here")
 
         can_modify = bool(list_path)
-        idx = paginated_list(rows, "Number to descend", can_mkdir=can_modify, can_modify=can_modify)
+        idx = paginated_list(rows, "Number to descend", can_mkdir=can_modify, can_modify=can_modify, can_upload=False)
 
         if idx is None:
             # Enter = select current directory
@@ -1797,6 +2018,26 @@ def ls_list(ip, remote):
     return entries
 
 
+def get_upload_files(local_path):
+    """Given a local path (file or dir), return (uploads, error).
+    uploads is a list of (local_file, relative_remote_path)."""
+    local_path = os.path.expanduser(local_path.strip())
+    if not os.path.exists(local_path):
+        return None, f"Not found: {local_path}"
+    uploads = []
+    if os.path.isfile(local_path):
+        uploads.append((local_path, os.path.basename(local_path)))
+    elif os.path.isdir(local_path):
+        for root, dirs, files in os.walk(local_path):
+            dirs.sort()
+            for fname in sorted(files):
+                full = os.path.join(root, fname)
+                rel  = os.path.relpath(full, os.path.dirname(local_path))
+                uploads.append((full, rel))
+    return uploads, None
+
+
+
 def ls_browse(ip, hostname, start_path, run_ip=None, suggested_name=None):
     """Interactive FTP browser."""
     import fnmatch, subprocess
@@ -1835,14 +2076,20 @@ def ls_browse(ip, hostname, start_path, run_ip=None, suggested_name=None):
             display_path = f"/{list_path}/" if list_path else "/"
             header(f"{hostname}: {display_path}")
             print(f"  (empty)")
-            idx = paginated_list([], "Number to select", can_mkdir=bool(list_path), can_modify=bool(list_path))
+            idx = paginated_list([], "Number to select", can_mkdir=bool(list_path), can_modify=bool(list_path), can_upload=True)
             if idx is None:
                 return
             if idx == "up":
                 list_path = "/".join(list_path.rstrip("/").split("/")[:-1])
                 path = list_path + "/" if list_path else ""
             elif idx == "mkdir":
-                dirname = input("  New directory name: ").strip()
+                if suggested_name:
+                    print(f"  [1] {suggested_name}/")
+                    print(f"  [2] Enter name manually")
+                    mk_choice = input("  Choose (or Enter for suggestion): ").strip()
+                    dirname = suggested_name if mk_choice != "2" else input("  New directory name: ").strip()
+                else:
+                    dirname = input("  New directory name: ").strip()
                 if dirname:
                     new_path = f"{list_path}/{dirname}" if list_path else dirname
                     url = ftp_url(ip, new_path + "/")
@@ -1867,7 +2114,7 @@ def ls_browse(ip, hostname, start_path, run_ip=None, suggested_name=None):
         header(f"{hostname}: {display_path}{label}")
         can_mkdir  = bool(list_path)
         can_modify = bool(list_path)
-        idx = paginated_list(rows, "Number to select", can_mkdir=can_mkdir, can_modify=can_modify)
+        idx = paginated_list(rows, "Number to select", can_mkdir=can_mkdir, can_modify=can_modify, can_upload=True)
         if idx is None:
             return
         if idx == "mkdir":
@@ -1936,6 +2183,48 @@ def ls_browse(ip, hostname, start_path, run_ip=None, suggested_name=None):
             else:
                 print("  Cancelled.")
             continue
+        if idx == "upload":
+            print()
+            print("  Upload:")
+            print("  [1] Enter local path")
+            print("  [2] Browse local filesystem")
+            print()
+            uc = input("  Choose: ").strip()
+            if uc == "2":
+                local_browse(ip, list_path or "/", hostname)
+                continue
+            else:
+                local_path = input("  Local path: ").strip()
+                if not local_path:
+                    continue
+                local_path = os.path.expanduser(local_path)
+
+            uploads, err = get_upload_files(local_path)
+            if err:
+                print(f"  {err}")
+                continue
+
+            import subprocess
+            remote_base = list_path.rstrip("/") if list_path else ""
+            label = os.path.basename(local_path.rstrip("/"))
+            dest  = f"/{remote_base}/{label}" if remote_base else f"/{label}"
+            print(f"  Uploading {label} -> {dest} ...")
+            ok = True
+            for local_file, rel_path in uploads:
+                remote_file = f"{remote_base}/{rel_path}" if remote_base else rel_path
+                url = ftp_url(ip, remote_file)
+                size_b = os.path.getsize(local_file)
+                print(f"    {rel_path} ...", end=" ", flush=True)
+                res = subprocess.run(["curl", "-s", "--ftp-create-dirs", "-T",
+                                      local_file, url],
+                                     capture_output=True, text=True)
+                if res.returncode == 0:
+                    print(f"done ({size_b:,} bytes)")
+                else:
+                    print(f"FAILED")
+                    ok = False
+            print(f"  Done." if ok else "  Completed with errors.")
+            continue
         if idx == "up":
             if not list_path or list_path in ("", "/"):
                 return
@@ -1945,8 +2234,62 @@ def ls_browse(ip, hostname, start_path, run_ip=None, suggested_name=None):
 
         name, is_dir, size = all_entries[idx]
         if is_dir:
-            base = list_path.rstrip("/")
-            path = f"{base}/{name}/" if base else f"{name}/"
+            dir_path = f"{list_path}/{name}" if list_path else name
+            # Get immediate listing for stats
+            entries = ls_list(ip, dir_path) or []
+            num_dirs  = sum(1 for _, d, _ in entries if d)
+            num_files = sum(1 for _, d, _ in entries if not d)
+            total_shown = sum(s for _, d, s in entries if not d)
+            mb = total_shown / (1024*1024)
+            if mb >= 1:
+                size_str = f"~{mb:.1f} MB shown" if num_dirs else f"{mb:.1f} MB"
+            else:
+                kb = total_shown / 1024
+                size_str = f"~{kb:.0f} KB shown" if num_dirs else f"{kb:.0f} KB"
+
+            print(f"\n  Selected: /{dir_path}/")
+            parts = []
+            if num_dirs:  parts.append(f"{num_dirs} dirs")
+            if num_files: parts.append(f"{num_files} files")
+            parts.append(size_str)
+            print(f"  {', '.join(parts)}")
+            print()
+            print(f"  [1] Enter directory")
+            print(f"  [2] Download all")
+            print(f"  [3] Go back")
+            print()
+            dir_choice = input("  Choose: ").strip()
+            if dir_choice == "2":
+                # Show warnings if needed
+                warns = []
+                if num_dirs:
+                    warns.append("Has subdirs, true size unknown")
+                if mb >= 50:
+                    warns.append("Very large download")
+                if warns:
+                    warn_str = " - ".join(warns)
+                    # Wrap at 38 chars
+                    if len(f"  ** {warn_str}") > 38:
+                        mid = warn_str.find(" - ")
+                        if mid > 0:
+                            print(f"  ** {warn_str[:mid]}")
+                            print(f"     {warn_str[mid+3:]}")
+                        else:
+                            print(f"  ** {warn_str[:34]}")
+                            print(f"     {warn_str[34:]}")
+                    else:
+                        print(f"  ** {warn_str}")
+                    ans = input("  Download anyway? [y/N]: ").strip().lower()
+                    if ans != "y":
+                        continue
+                target_dir = prompt_download_dir(name, None, multi_file=True)
+                dest = os.path.join(target_dir, slugify(name)) if target_dir in (".", "") else target_dir
+                print(f"  Downloading to {dest}/ ...")
+                ftp_fetch_recursive(ip, dir_path, dest)
+                print(f"  Done.")
+            elif dir_choice == "1" or not dir_choice:
+                base = list_path.rstrip("/")
+                path = f"{base}/{name}/" if base else f"{name}/"
             continue
 
         full_path = f"/{list_path}/{name}" if list_path else f"/{name}"
@@ -2072,6 +2415,43 @@ def cmd_mkdir(args):
         print(f"  Done.")
     else:
         print(f"  FAILED: {res.stderr.strip() or 'unknown error'}")
+
+
+def ftp_count_recursive(ip, path):
+    """Count files and total bytes in a remote directory recursively."""
+    entries = ls_list(ip, path) or []
+    count, total = 0, 0
+    for name, is_dir, size in entries:
+        child = f"{path.rstrip('/')}/{name}"
+        if is_dir:
+            c, t = ftp_count_recursive(ip, child)
+            count += c
+            total += t
+        else:
+            count += 1
+            total += size
+    return count, total
+
+
+def ftp_fetch_recursive(ip, remote_path, local_dir):
+    """Download all files from a remote directory recursively into local_dir."""
+    import subprocess
+    entries = ls_list(ip, remote_path) or []
+    os.makedirs(local_dir, exist_ok=True)
+    for name, is_dir, size in entries:
+        child_remote = f"{remote_path.rstrip('/')}/{name}"
+        child_local  = os.path.join(local_dir, name)
+        if is_dir:
+            ftp_fetch_recursive(ip, child_remote, child_local)
+        else:
+            print(f"  Fetching {name} ...", end=" ", flush=True)
+            res = subprocess.run(["curl", "-s", "-o", child_local,
+                                  f"ftp://{ip}/{child_remote.lstrip('/')}"],
+                                 capture_output=True, text=True)
+            if res.returncode == 0:
+                print(f"done  ({size:,} bytes)")
+            else:
+                print(f"FAILED")
 
 
 def ftp_delete_recursive(ip, path):
