@@ -270,6 +270,12 @@ def mount_disk(ip, filename, data, drive="a"):
         print(f"FAILED: {e}")
         return False
 
+def is_idun():
+    """True if running on the Idun cartridge (local shell or SSH)."""
+    return os.environ.get("IDUN_SYS_DIR") is not None
+
+
+
 def run_on_ultimate(filename, data, ip):
     ext    = "." + filename.lower().rsplit(".", 1)[-1]
     runner = ULTIMATE_RUNNERS.get(ext)
@@ -741,7 +747,7 @@ def read_input(prompt):
                 if seq == "[C":   # right arrow
                     return "n"
                 elif seq == "[D": # left arrow
-                    return "b"
+                    return "p"
                 elif seq == "[A": # up arrow
                     return "up"
                 elif seq == "[B": # down arrow
@@ -774,11 +780,10 @@ def read_input(prompt):
         return input("").strip()
 
 
-def paginated_list(rows, prompt):
+def paginated_list(rows, prompt, can_mkdir=False, can_modify=True):
     """
-    Display a paginated list. rows is a list of pre-formatted strings.
-    Returns the chosen 0-based index, None to quit, or "up" to go up a level.
-    Navigation: number to select, n/-> next, p/<- prev page, b/<- go up, q to quit.
+    Display a paginated list. 40 char wide C64 screen layout.
+    Returns index, None, "up", "mkdir", "rename", or "delete".
     """
     total  = len(rows)
     offset = 0
@@ -788,18 +793,40 @@ def paginated_list(rows, prompt):
             print(line)
         end = offset + len(page_rows)
         print()
+
+        # Line 1: Showing X-Y of Z | navigation
+        nav = []
+        if can_modify:
+            nav.append("u/^=up")
+        if offset > 0:
+            nav.append("p/<-=prev")
         if end < total:
-            print(f"  Showing {offset+1}-{end} of {total}  |  n/->=next  b/<-=prev  u/^=up  q=quit")
-        else:
-            print(f"  Showing {offset+1}-{end} of {total}  |  u/^=up  q=quit")
-        print()
-        choice = read_input(f"  {prompt}: ").lower()
+            nav.append("n/->=next")
+        nav_str = ("  " + "  ".join(nav)) if nav else ""
+        print(f"  Showing {offset+1}-{end} of {total}  |{nav_str}")
+
+        # Line 2: Number to select, actions q=quit:
+        actions = []
+        if can_modify:
+            if can_mkdir:
+                actions.append("m=mkdir")
+            actions += ["r=rename", "d=delete"]
+        actions.append("q=quit")
+        actions_str = "  ".join(actions)
+        choice = read_input(f"  Number to select,  {actions_str}: ").lower()
+
         if not choice or choice == "q":
             return None
-        if choice in ("up", "u"):
+        if choice in ("up", "u") and can_modify:
             return "up"
-        if choice == "b":
-            if offset == 0:
+        if choice == "m" and can_mkdir:
+            return "mkdir"
+        if choice == "r" and can_modify:
+            return "rename"
+        if choice == "d" and can_modify:
+            return "delete"
+        if choice in ("p", "b") or choice == "[D":
+            if offset == 0 and can_modify:
                 return "up"
             offset = max(0, offset - PAGE_SIZE)
             continue
@@ -807,17 +834,13 @@ def paginated_list(rows, prompt):
             if end < total:
                 offset += PAGE_SIZE
             continue
-        if choice == "p":
-            offset = max(0, offset - PAGE_SIZE)
-            continue
         try:
             idx = int(choice) - 1
             if 0 <= idx < total:
                 return idx
             print(f"  Out of range (1-{total})")
         except ValueError:
-            print("  Invalid -- enter a number, n/->, p, b/<-, or q")
-
+            print("  Invalid")
 
 def pick(items, run_ip=None, download=False, show_files=False, autodisk=False):
     print(f"\n  {len(items)} result(s):\n")
@@ -834,7 +857,7 @@ def pick(items, run_ip=None, download=False, show_files=False, autodisk=False):
         extra    = "  ".join(filter(None, [credits, date_str, cat]))
         rows.append(f"  {i:>3}. {name}  [{extra}]")
     idx = paginated_list(rows, "Enter number to view details")
-    if idx is None or idx == "up":
+    if idx is None or idx in ("up", "mkdir", "rename", "delete"):
         return
     show_item(items[idx], run_ip=run_ip, download=download, show_files=show_files, autodisk=autodisk)
 
@@ -843,7 +866,7 @@ def pick_name(names, prompt="select"):
     print(f"\n  {len(names)} match(es):\n")
     rows = [f"  {i:>3}. {n}" for i, n in enumerate(names, 1)]
     idx  = paginated_list(rows, f"Enter number to {prompt}")
-    if idx is None or idx == "up":
+    if idx is None or idx in ("up", "mkdir", "rename", "delete"):
         return None
     return names[idx]
 
@@ -1493,6 +1516,11 @@ def ls_browse(ip, hostname, start_path, run_ip=None):
     path = start_path.lstrip("/")
 
     while True:
+        # Normalize path — collapse double slashes, preserve trailing slash
+        had_trailing = path.endswith("/")
+        path = "/".join(p for p in path.split("/") if p)
+        if had_trailing and path:
+            path += "/"
         pattern   = None
         list_path = path
 
@@ -1525,10 +1553,70 @@ def ls_browse(ip, hostname, start_path, run_ip=None):
                 rows.append(f"  {i:>3}. {n}  ({size:,} bytes)" if size else f"  {i:>3}. {n}")
 
         label = f" (filter: {pattern.rstrip('*')})" if pattern else ""
-        header(f"{hostname}: /{list_path}/{label}")
-        idx = paginated_list(rows, "Number to select, u/^ to go up, q to quit")
+        display_path = f"/{list_path}/" if list_path else "/"
+        header(f"{hostname}: {display_path}{label}")
+        can_mkdir  = bool(list_path)
+        can_modify = bool(list_path)
+        idx = paginated_list(rows, "Number to select", can_mkdir=can_mkdir, can_modify=can_modify)
         if idx is None:
             return
+        if idx == "mkdir":
+            dirname = input("  New directory name: ").strip()
+            if dirname:
+                # Check if already exists
+                if any(n == dirname and d for n, d, _ in all_entries):
+                    print(f"  Already exists: {dirname}/")
+                else:
+                    new_path = f"{list_path}/{dirname}" if list_path else dirname
+                    url = ftp_url(ip, new_path + "/")
+                    res = subprocess.run(["curl", "-s", "--ftp-create-dirs", url],
+                                         capture_output=True, text=True)
+                    if res.returncode == 0:
+                        print(f"  Created: /{new_path}/")
+                    else:
+                        print(f"  FAILED: {res.stderr.strip() or 'unknown error'}")
+            continue
+        if idx == "rename":
+            num = input("  Number to rename: ").strip()
+            try:
+                entry_name, entry_is_dir, _ = all_entries[int(num) - 1]
+            except (ValueError, IndexError):
+                print("  Invalid number.")
+                continue
+            new_name = input(f"  Rename '{entry_name}' to: ").strip()
+            if new_name:
+                old_path = f"{list_path}/{entry_name}" if list_path else entry_name
+                new_path = f"{list_path}/{new_name}" if list_path else new_name
+                ok, err = ftp_rename(ip, old_path, new_path)
+                print("  Done." if ok else f"  FAILED: {err or 'unknown error'}")
+            continue
+        if idx == "delete":
+            num = input("  Number to delete: ").strip()
+            try:
+                entry_name, entry_is_dir, _ = all_entries[int(num) - 1]
+            except (ValueError, IndexError):
+                print("  Invalid number.")
+                continue
+            del_path = f"{list_path}/{entry_name}" if list_path else entry_name
+            label = f"/{del_path}/" if entry_is_dir else f"/{del_path}"
+            if entry_is_dir:
+                contents = ls_list(ip, del_path)
+                if contents:
+                    print(f"  {label} is not empty ({len(contents)} items).")
+                    ans = input(f"  Delete recursively? [y/N]: ").strip().lower()
+                    if ans == "y":
+                        ok, err = ftp_delete_recursive(ip, del_path)
+                        print("  Done." if ok else f"  FAILED: {err or 'unknown error'}")
+                    else:
+                        print("  Cancelled.")
+                    continue
+            ans = input(f"  Delete {label}? [y/N]: ").strip().lower()
+            if ans == "y":
+                ok, err = ftp_delete(ip, del_path, is_dir=entry_is_dir)
+                print("  Done." if ok else f"  FAILED: {err or 'unknown error'}")
+            else:
+                print("  Cancelled.")
+            continue
         if idx == "up":
             if not list_path or list_path in ("", "/"):
                 return
@@ -1538,7 +1626,8 @@ def ls_browse(ip, hostname, start_path, run_ip=None):
 
         name, is_dir, size = all_entries[idx]
         if is_dir:
-            path = f"{list_path}/{name}" if list_path else name
+            base = list_path.rstrip("/")
+            path = f"{base}/{name}/" if base else f"{name}/"
             continue
 
         full_path = f"/{list_path}/{name}" if list_path else f"/{name}"
@@ -1547,7 +1636,7 @@ def ls_browse(ip, hostname, start_path, run_ip=None):
 
         options = []
         if ext in DISK_TYPES or ext in ULTIMATE_RUNNERS:
-            options.append(("rrun",   "Run on Ultimate"))
+            options.append(("rrun",   "Run on Ultimate (sid player)" if ext == ".sid" else "Run on Ultimate"))
             options.append(("rmount", "Mount on drive A"))
         if ext in (".txt", ".md", ".nfo", ".diz", ".info", ".me"):
             options.append(("view", "View contents"))
@@ -1626,6 +1715,113 @@ def cmd_ls(args):
 
     run_ip = getattr(args, "run", None) or cfg.get("ultimate_ip", "")
     ls_browse(ip, hostname, args.path or "/", run_ip=run_ip)
+
+
+def cmd_mkdir(args):
+    """Create a directory on the Ultimate filesystem."""
+    import subprocess
+    cfg = load_config()
+    ip  = args.ip or cfg.get("ultimate_ip", "")
+    if not ip:
+        ip = input("  Ultimate IP address: ").strip()
+        if not ip:
+            print("  No IP given.")
+            return
+    path = args.path.lstrip("/")
+    url  = ftp_url(ip, path + "/")
+    print(f"  Creating /{path}/ ...")
+    res = subprocess.run(["curl", "-s", "--ftp-create-dirs", url],
+                         capture_output=True, text=True)
+    if res.returncode == 0:
+        print(f"  Done.")
+    else:
+        print(f"  FAILED: {res.stderr.strip() or 'unknown error'}")
+
+
+def ftp_delete_recursive(ip, path):
+    """Recursively delete a directory and all its contents via FTP."""
+    import subprocess
+    entries = ls_list(ip, path)
+    for name, is_dir, _ in entries:
+        child = f"{path.rstrip('/')}/{name}"
+        if is_dir:
+            ok, err = ftp_delete_recursive(ip, child)
+            if not ok:
+                return False, err
+        else:
+            res = subprocess.run([
+                "curl", "-s", f"ftp://{ip}/",
+                "--quote", f"DELE /{child.lstrip('/')}"
+            ], capture_output=True, text=True, errors="replace")
+            if res.returncode != 0:
+                return False, res.stderr.strip()
+    # Now remove the empty directory
+    res = subprocess.run([
+        "curl", "-s", f"ftp://{ip}/",
+        "--quote", f"RMD /{path.lstrip('/')}"
+    ], capture_output=True, text=True, errors="replace")
+    return res.returncode == 0, res.stderr.strip()
+
+
+def ftp_rename(ip, old_path, new_path):
+    """Rename a file or directory on the Ultimate via FTP RNFR/RNTO."""
+    import subprocess
+    res = subprocess.run([
+        "curl", "-s", f"ftp://{ip}/",
+        "--quote", f"RNFR /{old_path.lstrip('/')}",
+        "--quote", f"RNTO /{new_path.lstrip('/')}"
+    ], capture_output=True, text=True)
+    return res.returncode == 0, res.stderr.strip()
+
+
+def ftp_delete(ip, path, is_dir=False):
+    """Delete a file or directory on the Ultimate via FTP."""
+    import subprocess
+    if is_dir:
+        res = subprocess.run([
+            "curl", "-s", f"ftp://{ip}/",
+            "--quote", f"RMD /{path.lstrip('/')}"
+        ], capture_output=True, text=True, errors="replace")
+    else:
+        res = subprocess.run([
+            "curl", "-s", f"ftp://{ip}/",
+            "--quote", f"DELE /{path.lstrip('/')}"
+        ], capture_output=True, text=True, errors="replace")
+    return res.returncode == 0, res.stderr.strip()
+
+
+def cmd_rename(args):
+    """Rename a file or directory on the Ultimate filesystem."""
+    cfg = load_config()
+    ip  = args.ip or cfg.get("ultimate_ip", "")
+    if not ip:
+        ip = input("  Ultimate IP address: ").strip()
+        if not ip:
+            print("  No IP given.")
+            return
+    old = args.old.lstrip("/")
+    new = args.new.lstrip("/")
+    print(f"  Renaming /{old} -> /{new} ...")
+    ok, err = ftp_rename(ip, old, new)
+    print("  Done." if ok else f"  FAILED: {err or 'unknown error'}")
+
+
+def cmd_delete(args):
+    """Delete a file or directory on the Ultimate filesystem."""
+    cfg = load_config()
+    ip  = args.ip or cfg.get("ultimate_ip", "")
+    if not ip:
+        ip = input("  Ultimate IP address: ").strip()
+        if not ip:
+            print("  No IP given.")
+            return
+    path = args.path.lstrip("/")
+    ans  = input(f"  Delete /{path}? [y/N]: ").strip().lower()
+    if ans != "y":
+        print("  Cancelled.")
+        return
+    ok, err = ftp_delete(ip, path, is_dir=args.dir)
+    print("  Done." if ok else f"  FAILED: {err or 'unknown error'}")
 
 
 def cmd_reset(args):
@@ -1708,8 +1904,8 @@ Commands:
   presets [type]   Browse AQL query presets
   cats             List all categories
   ls      [path]   List files on the Ultimate
-  pull    <remote> [local]   Download file from the Ultimate
-  push    <local>  [remote]  Upload file to the Ultimate
+  pull/get <remote> [local]   Download file from the Ultimate
+  push/put <local>  [remote]  Upload file to the Ultimate
                    Paths support prefix filtering without wildcards:
                    ls SD/_BASIC/GH        -- lists all entries starting with GH
                    pull SD/_BASIC/GH      -- downloads matching file(s)
@@ -1823,12 +2019,12 @@ Examples:
     ls.add_argument("path", nargs="?", metavar="PATH", help="Remote path (default: USB1/)")
     ls.add_argument("--ip", metavar="IP")
 
-    pu = sub.add_parser("pull", help="Download a file from the Ultimate")
+    pu = sub.add_parser("pull", aliases=["get"], help="Download a file from the Ultimate")
     pu.add_argument("remote", metavar="REMOTE", help="Remote path e.g. USB1/DEMOS/foo.d64")
     pu.add_argument("local", nargs="?", metavar="LOCAL", help="Local filename (default: basename of remote)")
     pu.add_argument("--ip", metavar="IP")
 
-    ps = sub.add_parser("push", help="Upload a file to the Ultimate")
+    ps = sub.add_parser("push", aliases=["put"], help="Upload a file to the Ultimate")
     ps.add_argument("local", metavar="LOCAL", help="Local file to upload")
     ps.add_argument("remote", nargs="?", metavar="REMOTE", help="Remote directory (default: USB1/)")
     ps.add_argument("--ip", metavar="IP")
@@ -1845,6 +2041,20 @@ Examples:
     rm = sub.add_parser("rmount", help="Mount a file already on the Ultimate filesystem")
     rm.add_argument("path", metavar="PATH", help="Path on Ultimate e.g. SD/_BASIC/Tetris.d64")
     rm.add_argument("--ip", metavar="IP")
+
+    md = sub.add_parser("mkdir", help="Create a directory on the Ultimate filesystem")
+    md.add_argument("path", metavar="PATH", help="Directory to create e.g. USB1/NEWDIR")
+    md.add_argument("--ip", metavar="IP")
+
+    rn = sub.add_parser("rename", help="Rename a file or directory on the Ultimate")
+    rn.add_argument("old", metavar="OLD", help="Current path")
+    rn.add_argument("new", metavar="NEW", help="New path")
+    rn.add_argument("--ip", metavar="IP")
+
+    dl = sub.add_parser("delete", help="Delete a file or directory on the Ultimate")
+    dl.add_argument("path", metavar="PATH")
+    dl.add_argument("--dir", action="store_true", help="Path is a directory")
+    dl.add_argument("--ip", metavar="IP")
 
     rst = sub.add_parser("reset", help="Reset the C64")
     rst.add_argument("--ip", metavar="IP", help="Ultimate IP (uses saved default if not given)")
@@ -1880,9 +2090,9 @@ def main():
         cmd_run(args)
     elif args.cmd == "ls":
         cmd_ls(args)
-    elif args.cmd == "pull":
+    elif args.cmd in ("pull", "get"):
         cmd_pull(args)
-    elif args.cmd == "push":
+    elif args.cmd in ("push", "put"):
         cmd_push(args)
     elif args.cmd == "rrun":
         cmd_rrun(args)
@@ -1890,6 +2100,12 @@ def main():
         cmd_rmount(args)
     elif args.cmd == "mount":
         cmd_mount(args)
+    elif args.cmd == "mkdir":
+        cmd_mkdir(args)
+    elif args.cmd == "rename":
+        cmd_rename(args)
+    elif args.cmd == "delete":
+        cmd_delete(args)
     elif args.cmd == "reset":
         cmd_reset(args)
     elif args.cmd == "reboot":
