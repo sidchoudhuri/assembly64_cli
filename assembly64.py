@@ -85,10 +85,50 @@ def aql(query, offset=0, limit=50):
     qs = urllib.parse.urlencode({"query": query})
     return get(f"search/aql/{offset}/{limit}?{qs}")
 
+try:
+    import os as _os
+    _cols, _rows = _os.get_terminal_size()
+    PAGE_SIZE = max(5, _rows - 7)
+except Exception:
+    _cols, _rows = 80, 25
+    PAGE_SIZE = 20
+
+C64_TERMINAL = _cols <= 40
+
 # ---------- Formatting --------------------------------------------------------
 
+SEP_WIDTH = min(_cols, 62) if _cols <= 40 else 62
+
+# ANSI colors -- empty strings if not a real terminal
+if sys.stdout.isatty():
+    _CYAN   = "\033[36m"
+    _GREEN  = "\033[32m"
+    _YELLOW = "\033[33m"
+    _RESET  = "\033[0m"
+else:
+    _CYAN = _GREEN = _YELLOW = _RESET = ""
+
+
+class ColoredHelpFormatter(argparse.HelpFormatter):
+    """Argparse formatter with ANSI colors and terminal-width awareness."""
+    def __init__(self, prog):
+        super().__init__(prog, width=_cols, max_help_position=24)
+
+    def start_section(self, heading):
+        super().start_section(f"{_YELLOW}{heading}{_RESET}" if heading else heading)
+
+    def _format_action(self, action):
+        result = super()._format_action(action)
+        # Color subcommand names cyan
+        if action.option_strings:
+            for opt in action.option_strings:
+                result = result.replace(opt, f"{_GREEN}{opt}{_RESET}", 1)
+        elif action.dest and action.dest != "==SUPPRESS==":
+            result = result.replace(action.dest, f"{_CYAN}{action.dest}{_RESET}", 1)
+        return result
+
 def sep():
-    print("-" * 62)
+    print("-" * SEP_WIDTH)
 
 def header(t):
     sep()
@@ -318,19 +358,112 @@ def slugify(name):
     return name or "release"
 
 
-def prompt_download_dir(item_name, item_id):
-    """Ask user whether to download to current dir or a new folder. Returns target dir."""
-    folder = slugify(item_name)
+def prompt_download_dir(item_name, item_id, category=None, multi_file=False):
+    """Ask user where to download. Returns target dir."""
+    cfg        = load_config()
+    folder     = slugify(item_name)
+    demos_dir  = cfg.get("download_dir_demos", "")
+    sids_dir   = cfg.get("download_dir_sids", "")
+
+    # Pick the relevant configured dir based on category
+    configured_dir = ""
+    configured_label = ""
+    if category in (18, 4) and sids_dir:
+        configured_dir   = sids_dir
+        configured_label = f"SIDs dir ({sids_dir})"
+    elif category in (18, 4) and demos_dir:
+        configured_dir   = demos_dir
+        configured_label = f"Demos dir ({demos_dir})"
+    elif demos_dir:
+        configured_dir   = demos_dir
+        configured_label = f"Demos dir ({demos_dir})"
+
+    if configured_dir and multi_file:
+        configured_label += f" -> {folder}/"
+
+    # Build ordered options
+    options = []
+    if configured_dir:
+        options.append(("configured", configured_label))
+    options.append(("browse",  "Browse local filesystem"))
+    options.append(("current", "Current directory"))
+    options.append(("folder",  f"Create folder: {folder}/"))
+
     print(f"\n  Download to:")
-    print(f"  [1] Current directory")
-    print(f"  [2] Create folder: {folder}/")
+    for i, (_, label) in enumerate(options, 1):
+        print(f"  [{i}] {label}")
+
+    # Show tip if dirs not configured
+    if not demos_dir and not sids_dir:
+        print()
+        print("  ** assembly64 config --help to set dirs")
+
     print()
     choice = input("  Choose (or Enter for current directory): ").strip()
-    if choice == "2":
+
+    try:
+        n = int(choice) - 1
+        key, _ = options[n]
+    except (ValueError, IndexError):
+        return "."
+
+    if key == "configured":
+        target = os.path.join(configured_dir, folder) if multi_file else configured_dir
+        os.makedirs(target, exist_ok=True)
+        if multi_file:
+            print(f"  Using: {target}/")
+        return target
+
+    if key == "browse":
+        target = browse_local_dir()
+        if target is None:
+            return "."
+        return target
+
+    if key == "current":
+        return "."
+
+    if key == "folder":
         os.makedirs(folder, exist_ok=True)
         print(f"  Created folder: {folder}/")
         return folder
+
     return "."
+
+
+def browse_local_dir():
+    """Browse local filesystem to pick a destination directory.
+    Returns chosen path or None if cancelled."""
+    path = os.getcwd()
+    while True:
+        entries = sorted(
+            [e for e in os.listdir(path) if os.path.isdir(os.path.join(path, e))],
+            key=str.lower
+        )
+        rows = [f"  {i:>3}. {e}/" for i, e in enumerate(entries, 1)]
+        print()
+        header(f"Local: {path}")
+        print(f"  Enter=select this directory")
+        idx = paginated_list(rows, "Number to descend", can_mkdir=True, can_modify=path != os.path.dirname(path))
+        if idx is None:
+            return path
+        if idx == "up":
+            parent = os.path.dirname(path)
+            if parent != path:
+                path = parent
+            continue
+        if idx == "mkdir":
+            dirname = input("  New directory name: ").strip()
+            if dirname:
+                new_path = os.path.join(path, dirname)
+                os.makedirs(new_path, exist_ok=True)
+                print(f"  Created: {new_path}/")
+                path = new_path
+            continue
+        if idx in ("rename", "delete"):
+            continue
+        if 0 <= idx < len(entries):
+            path = os.path.join(path, entries[idx])
 
 
 def download_file(item_id, cat, f, run_ip=None, target_dir="."):
@@ -602,10 +735,12 @@ def handle_files(iid, cat, entries, run_ip, download, flipinfo=None, item_name=N
         return
 
     if len(entries) == 1:
+        if not run_ip and target_dir == ".":
+            target_dir = prompt_download_dir(item_name or "release", item_id, category=cat, multi_file=False)
         download_file(iid, cat, entries[0], run_ip=run_ip, target_dir=target_dir)
     else:
         if not run_ip and target_dir == ".":
-            target_dir = prompt_download_dir(item_name or "release", item_id)
+            target_dir = prompt_download_dir(item_name or "release", item_id, category=cat, multi_file=True)
         print("\n  Files:")
         for i, f in enumerate(entries, 1):
             print(f"    {i:>3}. {f.get('path','')}  ({f.get('size',0):,} bytes)")
@@ -679,7 +814,7 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
         return
 
     if download:
-        target_dir = prompt_download_dir(name, iid) if len(entries) > 1 else "."
+        target_dir = prompt_download_dir(name, iid, category=cat, multi_file=len(entries) > 1) if len(entries) > 1 else "."
         handle_files(iid, cat, entries, run_ip=None, download=True, flipinfo=flipinfo,
                      item_name=name, item_id=iid, target_dir=target_dir)
         return
@@ -704,7 +839,7 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
         handle_files(iid, cat, entries, run_ip=ip, download=False, flipinfo=fi,
                      item_name=name, item_id=iid)
     elif action[0] == "download":
-        target_dir = prompt_download_dir(name, iid) if len(entries) > 1 else "."
+        target_dir = prompt_download_dir(name, iid, category=cat, multi_file=len(entries) > 1) if len(entries) > 1 else "."
         if len(entries) == 1:
             download_file(iid, cat, entries[0], target_dir=target_dir)
         else:
@@ -722,8 +857,6 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
                 write_flip_file(flipinfo, disk_filenames, target_dir=target_dir, item_id=iid)
 
 # ---------- List helpers ------------------------------------------------------
-
-PAGE_SIZE = 20
 
 
 def read_input(prompt):
@@ -1133,7 +1266,7 @@ def find_flip_file(directory):
         fl = f.lower()
         fp = os.path.join(directory, f)
         if fl.endswith("-flip-info.txt") or fl.endswith("_flip_info.txt"):
-            # Numbered ones (e.g. 72550-flip-info.txt) — highest priority
+            # Numbered ones (e.g. 72550-flip-info.txt) -- highest priority
             numbered.append(fp)
         elif fl in ("flip-info.txt", "flipinfo.txt", "flip_info.txt"):
             plain.append(fp)
@@ -1341,7 +1474,7 @@ def cmd_rrun(args):
     ext  = "." + path.lower().rsplit(".", 1)[-1]
 
     if ext in ULTIMATE_RUNNERS:
-        # PRG/CRT/SID — use run_prg/run_crt/sidplay with file= param
+        # PRG/CRT/SID -- use run_prg/run_crt/sidplay with file= param
         runner = ULTIMATE_RUNNERS[ext]
         print(f"  Running {path} on Ultimate ...", end=" ", flush=True)
         try:
@@ -1351,7 +1484,7 @@ def cmd_rrun(args):
             print(f"FAILED: {e}")
 
     elif ext in DISK_TYPES:
-        # D64 — mount by path then reset + keyboard inject
+        # D64 -- mount by path then reset + keyboard inject
         print(f"  Mounting {path} ...", end=" ", flush=True)
         try:
             status = ultimate_put(ip, "drives/a:mount", {"image": path, "mode": "unlinked"})
@@ -1488,8 +1621,11 @@ def cmd_push(args):
         hostname = info.get("hostname", ip) if info else ip
         print(f"  Browse to destination (Enter=select current dir, q=cancel):")
 
+        # Suggest folder name from first local file (without extension)
+        suggested = os.path.splitext(os.path.basename(local_files[0]))[0] if local_files else None
+
         while True:
-            remote_dir = ls_browse_pick_dir(ip, hostname)
+            remote_dir = ls_browse_pick_dir(ip, hostname, suggested_name=suggested)
             if remote_dir is None:
                 print("  Cancelled.")
                 return
@@ -1512,7 +1648,7 @@ def cmd_push(args):
                     print(f"  FAILED: {result.stderr.strip() or 'unknown error'}")
 
             # Drop into full ls browser at the destination
-            ls_browse(ip, hostname, remote_dir + "/", run_ip=ip)
+            ls_browse(ip, hostname, remote_dir + "/", run_ip=ip, suggested_name=suggested)
             return
 
     for local in local_files:
@@ -1532,7 +1668,7 @@ def cmd_push(args):
             print(f"  FAILED: {result.stderr.strip() or 'unknown error'}")
 
 
-def ls_browse_pick_dir(ip, hostname):
+def ls_browse_pick_dir(ip, hostname, suggested_name=None):
     """Browse the Ultimate filesystem directories.
     Returns chosen directory path string, or None if cancelled.
     Enter with no number = select current directory.
@@ -1575,7 +1711,16 @@ def ls_browse_pick_dir(ip, hostname):
             continue
 
         if idx == "mkdir":
-            dirname = input("  New directory name: ").strip()
+            if suggested_name and not any(n == suggested_name and d for n, d, _ in all_entries):
+                print(f"  [1] {suggested_name}/")
+                print(f"  [2] Enter name manually")
+                mk_choice = input("  Choose (or Enter for suggestion): ").strip()
+                if mk_choice == "2":
+                    dirname = input("  New directory name: ").strip()
+                else:
+                    dirname = suggested_name
+            else:
+                dirname = input("  New directory name: ").strip()
             if dirname:
                 if any(n == dirname and d for n, d, _ in all_entries):
                     print(f"  Already exists: {dirname}/")
@@ -1652,13 +1797,13 @@ def ls_list(ip, remote):
     return entries
 
 
-def ls_browse(ip, hostname, start_path, run_ip=None):
+def ls_browse(ip, hostname, start_path, run_ip=None, suggested_name=None):
     """Interactive FTP browser."""
     import fnmatch, subprocess
     path = start_path.lstrip("/")
 
     while True:
-        # Normalize path — collapse double slashes, preserve trailing slash
+        # Normalize path -- collapse double slashes, preserve trailing slash
         had_trailing = path.endswith("/")
         path = "/".join(p for p in path.split("/") if p)
         if had_trailing and path:
@@ -1669,7 +1814,7 @@ def ls_browse(ip, hostname, start_path, run_ip=None):
         if path and not path.endswith("/"):
             entries = ls_list(ip, path)
             if entries is None or (entries == [] and not path.endswith("/")):
-                # Not a directory — treat last component as prefix filter
+                # Not a directory -- treat last component as prefix filter
                 parent  = "/".join(path.split("/")[:-1])
                 prefix  = path.split("/")[-1].lower()
                 pattern = prefix + "*"
@@ -1726,7 +1871,16 @@ def ls_browse(ip, hostname, start_path, run_ip=None):
         if idx is None:
             return
         if idx == "mkdir":
-            dirname = input("  New directory name: ").strip()
+            if suggested_name and not any(n == suggested_name and d for n, d, _ in all_entries):
+                print(f"  [1] {suggested_name}/")
+                print(f"  [2] Enter name manually")
+                mk_choice = input("  Choose (or Enter for suggestion): ").strip()
+                if mk_choice == "2":
+                    dirname = input("  New directory name: ").strip()
+                else:
+                    dirname = suggested_name
+            else:
+                dirname = input("  New directory name: ").strip()
             if dirname:
                 # Check if already exists
                 if any(n == dirname and d for n, d, _ in all_entries):
@@ -1859,7 +2013,20 @@ def ls_browse(ip, hostname, start_path, run_ip=None):
 def cmd_ls(args):
     """List and browse files on the Ultimate interactively."""
     cfg = load_config()
-    ip  = args.ip or cfg.get("ultimate_ip", "")
+
+    # If path looks like a device name, resolve its IP
+    path_arg = args.path or ""
+    if path_arg and not path_arg.startswith("/") and "/" not in path_arg:
+        # Check if it matches a device name
+        devices = cfg.get("devices", [])
+        dev = next((d for d in devices if d["name"].lower() == path_arg.lower()), None)
+        if dev:
+            # Override IP and clear path
+            args.ip   = dev["ip"]
+            path_arg  = ""
+            print(f"  Using device: {dev['name']} ({dev['ip']})")
+
+    ip = args.ip or cfg.get("ultimate_ip", "")
     if not ip:
         ip = input("  Ultimate IP address: ").strip()
         if not ip:
@@ -1875,11 +2042,15 @@ def cmd_ls(args):
         pass
     hostname = info.get("hostname", ip) if info else ip
 
-    if "*" in (args.path or "") or "?" in (args.path or ""):
+    if "*" in path_arg or "?" in path_arg:
         print("  Tip: on zsh, quote wildcards: \"GH*\"")
 
+    # Default path: explicit arg > config default > root
+    default_path = cfg.get("ls_default_path", "/")
+    start_path   = path_arg or default_path
+
     run_ip = getattr(args, "run", None) or cfg.get("ultimate_ip", "")
-    ls_browse(ip, hostname, args.path or "/", run_ip=run_ip)
+    ls_browse(ip, hostname, start_path, run_ip=run_ip)
 
 
 def cmd_mkdir(args):
@@ -2021,22 +2192,145 @@ def cmd_reboot(args):
         print(f"FAILED: {e}")
 
 
+def active_ip(args=None, cfg=None):
+    """Return the currently active Ultimate IP from args, config, or prompt."""
+    if cfg is None:
+        cfg = load_config()
+    ip = (getattr(args, "ip", None) or "") if args else ""
+    return ip or cfg.get("ultimate_ip", "")
+
+
+
+def cmd_device_list(args):
+    """List configured devices (read-only)."""
+    cfg     = load_config()
+    devices = cfg.get("devices", [])
+    current = cfg.get("default_device", "")
+    if not devices:
+        print("  No devices configured.")
+        print("  Use: assembly64 config --add NAME IP")
+        return
+    header("DEVICES")
+    for d in devices:
+        marker = " *" if d["name"] == current else ""
+        print(f"  {d['name']:<20} {d['ip']}{marker}")
+    print(f"  (* = active)")
+    sep()
+
+
 def cmd_config(args):
-    cfg = load_config()
-    if args.set_ip:
-        cfg["ultimate_ip"] = args.set_ip
+    cfg     = load_config()
+    devices = cfg.get("devices", [])
+    changed = False
+
+    # Device management
+    if getattr(args, "add", None):
+        name, ip = args.add
+        if any(d["name"] == name for d in devices):
+            print(f"  Device '{name}' already exists. Use --remove first.")
+            return
+        devices.append({"name": name, "ip": ip})
+        cfg["devices"] = devices
+        if not cfg.get("ultimate_ip"):
+            cfg["ultimate_ip"] = ip
+            cfg["default_device"] = name
         save_config(cfg)
-        print(f"  Saved Ultimate IP: {args.set_ip}")
-    elif args.show:
-        header("CONFIG")
-        for k, v in cfg.items():
-            field(f"{k}:", v)
-        if not cfg:
-            print("  (no config saved)")
+        print(f"  Added: {name} ({ip})")
+        return
+
+    if getattr(args, "remove", None):
+        name   = args.remove
+        before = len(devices)
+        devices = [d for d in devices if d["name"] != name]
+        if len(devices) == before:
+            print(f"  Device '{name}' not found.")
+            return
+        cfg["devices"] = devices
+        if cfg.get("default_device") == name:
+            if devices:
+                cfg["default_device"] = devices[0]["name"]
+                cfg["ultimate_ip"]    = devices[0]["ip"]
+                print(f"  Switched active to: {devices[0]['name']}")
+            else:
+                cfg.pop("default_device", None)
+                cfg.pop("ultimate_ip", None)
+        save_config(cfg)
+        print(f"  Removed: {name}")
+        return
+
+    if getattr(args, "set", None):
+        name = args.set
+        dev  = next((d for d in devices if d["name"] == name), None)
+        if not dev:
+            print(f"  Device '{name}' not found.")
+            return
+        cfg["default_device"] = name
+        cfg["ultimate_ip"]    = dev["ip"]
+        save_config(cfg)
+        print(f"  Active: {name} ({dev['ip']})")
+        return
+
+    if getattr(args, "next", False):
+        if not devices:
+            print("  No devices configured.")
+            return
+        current  = cfg.get("default_device", "")
+        idx      = next((i for i, d in enumerate(devices) if d["name"] == current), -1)
+        next_dev = devices[(idx + 1) % len(devices)]
+        cfg["default_device"] = next_dev["name"]
+        cfg["ultimate_ip"]    = next_dev["ip"]
+        save_config(cfg)
+        print(f"  Active: {next_dev['name']} ({next_dev['ip']})")
+        return
+
+    # Settings
+    if getattr(args, "set_ip", None):
+        cfg["ultimate_ip"] = args.set_ip
+        changed = True
+        print(f"  Saved IP: {args.set_ip}")
+
+    if getattr(args, "set_demos_dir", None):
+        cfg["download_dir_demos"] = os.path.expanduser(args.set_demos_dir)
+        changed = True
+        print(f"  Saved demos dir: {cfg['download_dir_demos']}")
+
+    if getattr(args, "set_sids_dir", None):
+        cfg["download_dir_sids"] = os.path.expanduser(args.set_sids_dir)
+        changed = True
+        print(f"  Saved SIDs dir: {cfg['download_dir_sids']}")
+
+    if getattr(args, "set_ls_path", None):
+        cfg["ls_default_path"] = args.set_ls_path
+        changed = True
+        print(f"  Saved ls default path: {args.set_ls_path}")
+
+    if changed:
+        save_config(cfg)
+        return
+
+    # Show all config
+    header("CONFIG")
+    current = cfg.get("default_device", "")
+    print(f"  Config:    {CONFIG_FILE}")
+    print(f"  Active IP: {cfg.get('ultimate_ip', '(not set)')}")
+    demos = cfg.get("download_dir_demos", "")
+    sids  = cfg.get("download_dir_sids", "")
+    ls_path = cfg.get("ls_default_path", "")
+    if demos:
+        print(f"  Demos dir: {demos}")
+    if sids:
+        print(f"  SIDs dir:  {sids}")
+    if ls_path:
+        print(f"  ls path:   {ls_path}")
+    if devices:
         sep()
-    else:
-        print(f"  Config file: {CONFIG_FILE}")
-        print(f"  Current IP:  {cfg.get('ultimate_ip', '(not set)')}")
+        for d in devices:
+            marker = " *" if d["name"] == current else ""
+            print(f"  {d['name']:<20} {d['ip']}{marker}")
+        print(f"  (* = active)")
+    elif not cfg:
+        print("  (no config saved)")
+    sep()
 
 # ---------- Parser ------------------------------------------------------------
 
@@ -2056,97 +2350,120 @@ def add_common(sp):
     sp.add_argument("--autodisk", action="store_true", help="Auto-flip disks using Assembly64 flip timings (--run required)")
 
 
+FULL_HELP = """
+ASSEMBLY64 - C64 Scene Tool
+hackerswithstyle.se/leet/
+
+COMMANDS
+  search [query]   Search releases
+  sid <query>      Search HVSC SIDs
+  charts           Browse top charts
+  presets          Browse AQL presets
+  cats             Browse categories
+  ls/remote [path] Browse Ultimate files
+  push/put <file>  Upload to Ultimate
+  pull/get <path>  Download
+  run <path>       Run local file/dir
+  rrun <path>      Run file on Ultimate
+  mount <file>     Mount local disk
+  rmount <path>    Mount remote disk
+  mkdir <path>     Create directory
+  rename <old> <new>  Rename
+  delete <path>    Delete file/dir
+  reset            Reset the C64
+  reboot           Reboot the C64
+  device/devices   List devices
+  config           Show/set config
+  help             Show this help
+
+SEARCH FLAGS
+  --group  --handle  --repo  --cat
+  --date / --after / --before
+  --order asc|desc  --limit N
+  --download  --run IP  --autodisk
+
+FILE TYPES
+  .prg .crt   DMA load and run
+  .sid        SID player
+  .d64 .d71 .d81 .g64 .g71
+              Mount, reset, autorun
+
+MULTI-DISK AUTO-FLIP
+  Enter=flip now  q+Enter=stop
+
+LS/REMOTE BROWSER KEYS
+  number    select / descend
+  u / ^     go up a level
+  b / <-    prev page
+  n / ->    next page
+  m         make directory
+  r         rename
+  d         delete
+  q         quit
+
+LS TIPS
+  ls              start at / or default
+  ls USB1/DEMOS   start at specific path
+  ls U64EII       use named device
+  config --set-ls-path USB1  set default
+
+CONFIG FLAGS
+  --set-ip IP      Set active IP
+  --set-demos-dir  Set demos dir
+  --set-sids-dir   Set SIDs dir
+  --set-ls-path    Set default ls path
+  --add NAME IP    Add a device
+  --remove NAME    Remove a device
+  --set NAME       Set active device
+  --next           Cycle to next device
+"""
+
+EXAMPLES = """
+EXAMPLES
+  assembly64 search "edge of disgrace"
+  assembly64 search --group fairlight
+  assembly64 search --handle laxity
+  assembly64 sid sanxion
+  assembly64 charts
+  assembly64 ls
+  assembly64 ls USB1/DEMOS
+  assembly64 ls U64EII
+  assembly64 remote
+  assembly64 push game.d64
+  assembly64 run mygame.d64
+  assembly64 rrun SD/_BASIC/Tetris.d64
+  assembly64 reset
+  assembly64 device
+  assembly64 config
+  assembly64 config --set-ip 192.168.2.32
+  assembly64 config --set-demos-dir ~/demos
+  assembly64 config --set-sids-dir ~/sids
+  assembly64 config --set-ls-path USB1
+  assembly64 config --add U64 192.168.2.32
+  assembly64 config --add U2L 192.168.2.33
+  assembly64 config --set U2L
+  assembly64 config --next
+  assembly64 config --remove U2L
+"""
+
+
+def cmd_help(args):
+    print(FULL_HELP)
+    print(EXAMPLES)
+
+
+
 def build_parser():
     p = argparse.ArgumentParser(
         prog="assembly64",
         description="C64 scene lookup via the Assembly64 API (hackerswithstyle.se/leet/)",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=f"""
-Commands:
-  search  [query]  Search by name or AQL filters
-  sid     <query>  Search HVSC SID music
-  charts  [name]   Browse top charts
-  presets [type]   Browse AQL query presets
-  cats             List all categories
-  ls      [path]   List files on the Ultimate
-  pull/get <remote> [local]   Download file from the Ultimate
-  push/put <local>  [remote]  Upload file to the Ultimate
-                   Paths support prefix filtering without wildcards:
-                   ls SD/_BASIC/GH        -- lists all entries starting with GH
-                   pull SD/_BASIC/GH      -- downloads matching file(s)
-                   On zsh, quote wildcards if you use them: "GH*"
-  rrun    <path>   Run a file already on the Ultimate filesystem
-  rmount  <path>   Mount a file already on the Ultimate filesystem
-  mount   <file>   Mount a local disk image on drive A (--remote for Ultimate filesystem)
-  run     <path>   Run a local file or directory on the Ultimate
-                   --remote: path is on the Ultimate filesystem (same as rrun)
-                   Supports: .prg .crt .sid .d64 .d71 .d81 .g64 .g71
-                   For directories: auto-detects flip-info.txt/.lst/.vfl
-                   for multi-disk ordering and auto-flip timings
-  reboot           Reboot the C64 (reinitialises cartridge + reset)
-  config           Show/set saved config
-
-After selecting any item you'll be prompted to:
-  Run on Ultimate          -- sends file to your C64 via REST API
-  Run with auto disk flip  -- auto-mounts disks using Assembly64 flip timings
-                             (only shown when flip info is available)
-  Download                 -- saves to current directory
-  Quit
-
-Supported file types for --run:
-  .prg / .crt   DMA load and run
-  .sid          SID player
-  .d64 / .g64 / .d71 / .g71 / .d81
-                mount on drive A, reset, inject LOAD"*",8,1 + RUN
-
-Multi-disk releases:
-  Disks are downloaded upfront. You're prompted to flip manually,
-  or use auto disk flip (if flip info available) which counts down
-  and mounts the next disk automatically.
-  During auto-flip: Enter=flip now, q+Enter=stop sequence
-
-Flags (bypass the interactive prompt):
-  --download         download immediately without prompting
-  --run IP           run on Ultimate at IP without prompting
-  --autodisk         use auto disk flip timing (requires --run)
-  --files            show file listing only, no action
-  --limit N          max AQL results (default 50)
-
-Pagination: n/-> next page, p/<- prev page, q/Enter to quit
-
-Save your Ultimate IP so you don't have to type it every time:
-  assembly64 config --set-ip 192.168.2.32
-  assembly64 config --show
-
-Name search (uses search/releases):
-  assembly64 search "edge of disgrace"         CSDB demos (default)
-  assembly64 search "commando" --cat games     CSDB games
-  assembly64 sid sanxion                       HVSC SIDs
-
-AQL filter search (needs at least one of --group/--handle/--repo/--cat/--date):
-  --group    group name  e.g. fairlight, "Booze Design"
-  --handle   scener      e.g. laxity
-  --repo     {', '.join(sorted(REPOS))}
-  --cat      {', '.join(CATEGORIES)}
-  --date / --after / --before   YYYYMMDD
-  --order    asc or desc
-
-Examples:
-  assembly64 search "edge of disgrace"
-  assembly64 search "edge of disgrace" --run 192.168.2.32
-  assembly64 search "edge of disgrace" --run 192.168.2.32 --autodisk
-  assembly64 search --group fairlight --cat demos --order asc
-  assembly64 search --group "Booze Design" --after 20000101
-  assembly64 search --handle laxity --repo csdb
-  assembly64 sid sanxion
-  assembly64 charts
-  assembly64 charts "Top Demos"
-  assembly64 presets
-  assembly64 reset
-  assembly64 config --set-ip 192.168.2.32
-        """
+        formatter_class=ColoredHelpFormatter,
     )
+    p.add_argument("--full-help", "--fullhelp", action="store_true", help="Show full help")
+    p.add_argument("--examples",  action="store_true", help="Show examples")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    sub.add_parser("help", help="Show full help")
 
     s = sub.add_parser("search", help="Search by name or AQL filters")
     s.add_argument("name", nargs="?", metavar="QUERY")
@@ -2180,7 +2497,7 @@ Examples:
     ru.add_argument("--ip", metavar="IP", help="Ultimate IP (uses saved default if not given)")
     ru.add_argument("--remote", action="store_true", help="Path is on the Ultimate filesystem, not local")
 
-    ls = sub.add_parser("ls", help="List files on the Ultimate")
+    ls = sub.add_parser("ls", aliases=["remote"], help="List files on the Ultimate")
     ls.add_argument("path", nargs="?", metavar="PATH", help="Remote path (default: USB1/)")
     ls.add_argument("--ip", metavar="IP")
 
@@ -2227,9 +2544,17 @@ Examples:
     rbt = sub.add_parser("reboot", help="Reboot the C64 (reinitialises cartridge + reset)")
     rbt.add_argument("--ip", metavar="IP", help="Ultimate IP (uses saved default if not given)")
 
-    cfg = sub.add_parser("config", help="Show or set saved configuration")
-    cfg.add_argument("--set-ip", metavar="IP", help="Save default Ultimate IP address")
-    cfg.add_argument("--show",   action="store_true", help="Show current config")
+    cfg_p = sub.add_parser("config", help="Show or set saved configuration")
+    cfg_p.add_argument("--set-ip",        metavar="IP",          help="Save default Ultimate IP")
+    cfg_p.add_argument("--set-demos-dir", metavar="DIR",         help="Default download dir for demos")
+    cfg_p.add_argument("--set-sids-dir",  metavar="DIR",         help="Default download dir for SIDs")
+    cfg_p.add_argument("--set-ls-path",   metavar="PATH",        help="Default ls start path (default: /)")
+    cfg_p.add_argument("--add",           nargs=2, metavar=("NAME", "IP"), help="Add a device")
+    cfg_p.add_argument("--remove",        metavar="NAME",        help="Remove a device")
+    cfg_p.add_argument("--set",           metavar="NAME",        help="Set active device")
+    cfg_p.add_argument("--next",          action="store_true",   help="Switch to next device")
+
+    sub.add_parser("device",  aliases=["devices"], help="List configured Ultimate devices")
 
     return p
 
@@ -2239,9 +2564,21 @@ def main():
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(0)
+
+    # Handle --full-help, --fullhelp, --examples before subcommand parsing
+    if "--full-help" in sys.argv or "--fullhelp" in sys.argv:
+        print(FULL_HELP)
+        print(EXAMPLES)
+        sys.exit(0)
+    if "--examples" in sys.argv:
+        print(EXAMPLES)
+        sys.exit(0)
+
     args = parser.parse_args()
 
-    if args.cmd == "search":
+    if args.cmd == "help":
+        cmd_help(args)
+    elif args.cmd == "search":
         cmd_search(args)
     elif args.cmd == "sid":
         cmd_sid(args)
@@ -2253,7 +2590,7 @@ def main():
         cmd_categories(args)
     elif args.cmd == "run":
         cmd_run(args)
-    elif args.cmd == "ls":
+    elif args.cmd in ("ls", "remote"):
         cmd_ls(args)
     elif args.cmd in ("pull", "get"):
         cmd_pull(args)
@@ -2275,8 +2612,11 @@ def main():
         cmd_reset(args)
     elif args.cmd == "reboot":
         cmd_reboot(args)
-    elif args.cmd == "config":
-        cmd_config(args)
+    elif args.cmd in ("config", "device", "devices"):
+        if args.cmd in ("device", "devices"):
+            cmd_device_list(args)
+        else:
+            cmd_config(args)
 
 
 if __name__ == "__main__":
