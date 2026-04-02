@@ -741,7 +741,11 @@ def read_input(prompt):
                 if seq == "[C":   # right arrow
                     return "n"
                 elif seq == "[D": # left arrow
-                    return "p"
+                    return "b"
+                elif seq == "[A": # up arrow
+                    return "up"
+                elif seq == "[B": # down arrow
+                    return "n"
                 else:
                     return ""
             elif ch in ("\r", "\n"):
@@ -773,8 +777,8 @@ def read_input(prompt):
 def paginated_list(rows, prompt):
     """
     Display a paginated list. rows is a list of pre-formatted strings.
-    Returns the chosen 0-based index, or None.
-    Navigation: number to select, n/-> next, p/<- prev, q/Enter to quit.
+    Returns the chosen 0-based index, None to quit, or "up" to go up a level.
+    Navigation: number to select, n/-> next, p/<- prev page, b/<- go up, q to quit.
     """
     total  = len(rows)
     offset = 0
@@ -785,13 +789,20 @@ def paginated_list(rows, prompt):
         end = offset + len(page_rows)
         print()
         if end < total:
-            print(f"  Showing {offset+1}-{end} of {total}  |  n/->=next  p/<-=prev  q=quit")
+            print(f"  Showing {offset+1}-{end} of {total}  |  n/->=next  b/<-=prev  u/^=up  q=quit")
         else:
-            print(f"  Showing {offset+1}-{end} of {total}")
+            print(f"  Showing {offset+1}-{end} of {total}  |  u/^=up  q=quit")
         print()
         choice = read_input(f"  {prompt}: ").lower()
         if not choice or choice == "q":
             return None
+        if choice in ("up", "u"):
+            return "up"
+        if choice == "b":
+            if offset == 0:
+                return "up"
+            offset = max(0, offset - PAGE_SIZE)
+            continue
         if choice == "n":
             if end < total:
                 offset += PAGE_SIZE
@@ -805,7 +816,7 @@ def paginated_list(rows, prompt):
                 return idx
             print(f"  Out of range (1-{total})")
         except ValueError:
-            print("  Invalid -- enter a number, n/->, p/<-, or q")
+            print("  Invalid -- enter a number, n/->, p, b/<-, or q")
 
 
 def pick(items, run_ip=None, download=False, show_files=False, autodisk=False):
@@ -823,7 +834,7 @@ def pick(items, run_ip=None, download=False, show_files=False, autodisk=False):
         extra    = "  ".join(filter(None, [credits, date_str, cat]))
         rows.append(f"  {i:>3}. {name}  [{extra}]")
     idx = paginated_list(rows, "Enter number to view details")
-    if idx is None:
+    if idx is None or idx == "up":
         return
     show_item(items[idx], run_ip=run_ip, download=download, show_files=show_files, autodisk=autodisk)
 
@@ -832,7 +843,7 @@ def pick_name(names, prompt="select"):
     print(f"\n  {len(names)} match(es):\n")
     rows = [f"  {i:>3}. {n}" for i, n in enumerate(names, 1)]
     idx  = paginated_list(rows, f"Enter number to {prompt}")
-    if idx is None:
+    if idx is None or idx == "up":
         return None
     return names[idx]
 
@@ -1238,7 +1249,8 @@ def cmd_run(args):
     print(f"  Not found: {path}")
 
 
-def cmd_mount(args):
+def cmd_rmount(args):
+    """Mount a file already on the Ultimate filesystem on drive A."""
     cfg = load_config()
     ip  = args.ip or cfg.get("ultimate_ip", "")
     if not ip:
@@ -1246,6 +1258,35 @@ def cmd_mount(args):
         if not ip:
             print("  No IP given.")
             return
+    path = "/" + args.path.lstrip("/")
+    print(f"  Mounting {path} on drive A: ...", end=" ", flush=True)
+    try:
+        status = ultimate_put(ip, "drives/a:mount", {"image": path, "mode": "unlinked"})
+        print(f"done  ({status})")
+    except Exception as e:
+        print(f"FAILED: {e}")
+
+
+def cmd_mount(args):
+    """Mount a local or remote disk image on drive A (no reset or autorun)."""
+    cfg = load_config()
+    ip  = args.ip or cfg.get("ultimate_ip", "")
+    if not ip:
+        ip = input("  Ultimate IP address: ").strip()
+        if not ip:
+            print("  No IP given.")
+            return
+
+    if getattr(args, "remote", False):
+        path = "/" + args.path.lstrip("/")
+        print(f"  Mounting {path} on drive A: ...", end=" ", flush=True)
+        try:
+            status = ultimate_put(ip, "drives/a:mount", {"image": path, "mode": "unlinked"})
+            print(f"done  ({status})")
+        except Exception as e:
+            print(f"FAILED: {e}")
+        return
+
     path = args.path
     if not os.path.isfile(path):
         print(f"  File not found: {path}")
@@ -1430,9 +1471,139 @@ def cmd_push(args):
             print(f"  FAILED: {result.stderr.strip() or 'unknown error'}")
 
 
+def ls_list(ip, remote):
+    """Fetch and parse an FTP directory listing. Returns list of (name, is_dir, size)."""
+    import subprocess
+    url    = ftp_url(ip, remote if remote.endswith("/") else remote + "/")
+    result = subprocess.run(["curl", "-s", url], capture_output=True, text=True)
+    entries = []
+    for line in result.stdout.strip().splitlines():
+        parts = line.split(None, 8)
+        if len(parts) >= 9:
+            is_dir = parts[0].startswith("d")
+            size   = int(parts[4]) if not is_dir and parts[4].isdigit() else 0
+            name   = parts[8]
+            entries.append((name, is_dir, size))
+    return entries
+
+
+def ls_browse(ip, hostname, start_path, run_ip=None):
+    """Interactive FTP browser."""
+    import fnmatch, subprocess
+    path = start_path.lstrip("/")
+
+    while True:
+        pattern   = None
+        list_path = path
+
+        if path and not path.endswith("/"):
+            entries = ls_list(ip, path)
+            if not entries:
+                parent  = "/".join(path.split("/")[:-1])
+                prefix  = path.split("/")[-1].lower()
+                pattern = prefix + "*"
+                list_path = parent
+                entries = ls_list(ip, list_path)
+                entries = [(n, d, s) for n, d, s in entries
+                           if fnmatch.fnmatch(n.lower(), pattern)]
+        else:
+            entries = ls_list(ip, list_path)
+
+        if not entries:
+            print(f"  Empty or not found: /{list_path}")
+            return
+
+        dirs  = [(n, d, s) for n, d, s in entries if d]
+        files = [(n, d, s) for n, d, s in entries if not d]
+        all_entries = dirs + files
+
+        rows = []
+        for i, (n, is_dir, size) in enumerate(all_entries, 1):
+            if is_dir:
+                rows.append(f"  {i:>3}. [DIR]  {n}/")
+            else:
+                rows.append(f"  {i:>3}. {n}  ({size:,} bytes)" if size else f"  {i:>3}. {n}")
+
+        label = f" (filter: {pattern.rstrip('*')})" if pattern else ""
+        header(f"{hostname}: /{list_path}/{label}")
+        idx = paginated_list(rows, "Number to select, u/^ to go up, q to quit")
+        if idx is None:
+            return
+        if idx == "up":
+            if not list_path or list_path in ("", "/"):
+                return
+            list_path = "/".join(list_path.rstrip("/").split("/")[:-1])
+            path = list_path
+            continue
+
+        name, is_dir, size = all_entries[idx]
+        if is_dir:
+            path = f"{list_path}/{name}" if list_path else name
+            continue
+
+        full_path = f"/{list_path}/{name}" if list_path else f"/{name}"
+        ext = "." + name.lower().rsplit(".", 1)[-1]
+        print(f"\n  Selected: {full_path}")
+
+        options = []
+        if ext in DISK_TYPES or ext in ULTIMATE_RUNNERS:
+            options.append(("rrun",   "Run on Ultimate"))
+            options.append(("rmount", "Mount on drive A"))
+        if ext in (".txt", ".md", ".nfo", ".diz", ".info", ".me"):
+            options.append(("view", "View contents"))
+        options.append(("pull", "Download to current directory"))
+        options.append(("back", "Go back"))
+
+        print()
+        for i, (_, lbl) in enumerate(options, 1):
+            print(f"  [{i}] {lbl}")
+        print()
+        choice = input("  Choose (or Enter to go back): ").strip()
+        if not choice:
+            continue
+        try:
+            key, _ = options[int(choice) - 1]
+        except (ValueError, IndexError):
+            continue
+
+        if key == "back":
+            continue
+        elif key == "view":
+            res = subprocess.run(["curl", "-s", ftp_url(ip, full_path.lstrip("/"))],
+                                 capture_output=True, text=True, errors="replace")
+            if res.returncode == 0:
+                header(f"View: {name}")
+                print(res.stdout)
+                sep()
+                input("  Press Enter to continue...")
+            else:
+                print(f"  FAILED: {res.stderr.strip() or 'unknown error'}")
+        elif key == "pull":
+            local = name
+            print(f"  Pulling {full_path} -> {local} ...")
+            res = subprocess.run(["curl", "-s", "-o", local,
+                                  ftp_url(ip, full_path.lstrip("/"))],
+                                 capture_output=True, text=True)
+            if res.returncode == 0 and os.path.exists(local):
+                print(f"  Saved  ->  {local}  ({os.path.getsize(local):,} bytes)")
+            else:
+                print(f"  FAILED: {res.stderr.strip() or 'unknown error'}")
+        elif key == "rmount":
+            print(f"  Mounting {full_path} on drive A: ...", end=" ", flush=True)
+            try:
+                status = ultimate_put(ip, "drives/a:mount",
+                                      {"image": full_path, "mode": "unlinked"})
+                print(f"done  ({status})")
+            except Exception as e:
+                print(f"FAILED: {e}")
+        elif key == "rrun":
+            import argparse
+            fake = argparse.Namespace(path=full_path, ip=ip)
+            cmd_rrun(fake)
+
+
 def cmd_ls(args):
-    """List files on the Ultimate."""
-    import subprocess, fnmatch
+    """List and browse files on the Ultimate interactively."""
     cfg = load_config()
     ip  = args.ip or cfg.get("ultimate_ip", "")
     if not ip:
@@ -1450,59 +1621,11 @@ def cmd_ls(args):
         pass
     hostname = info.get("hostname", ip) if info else ip
 
-    path = (args.path or "/").lstrip("/")
+    if "*" in (args.path or "") or "?" in (args.path or ""):
+        print("  Tip: on zsh, quote wildcards: \"GH*\"")
 
-    # Determine parent and filter pattern
-    # Works for explicit wildcards (GH*) or bare prefixes (GH)
-    if "*" in path or "?" in path:
-        print("  Tip: on zsh, quote wildcards to avoid shell expansion: \"GH*\"")
-        parent  = "/".join(path.split("/")[:-1])
-        pattern = path.split("/")[-1].lower()
-    else:
-        # Try listing as a directory first; if empty/failed treat last component as prefix filter
-        remote = path if path.endswith("/") else path + "/"
-        result = subprocess.run(["curl", "-s", ftp_url(ip, remote)], capture_output=True, text=True)
-        if result.returncode == 0 and result.stdout.strip():
-            # It's a valid directory — show it
-            header(f"{hostname}: /{remote}")
-            for line in result.stdout.strip().splitlines():
-                parts = line.split(None, 8)
-                if len(parts) >= 9:
-                    is_dir = parts[0].startswith("d")
-                    size   = parts[4] if not is_dir else ""
-                    name   = parts[8]
-                    if is_dir:
-                        print(f"  [{name}/]")
-                    else:
-                        print(f"  {name}  ({int(size):,} bytes)" if size else f"  {name}")
-                else:
-                    print(f"  {line}")
-            sep()
-            return
-        # Not a directory — treat last component as prefix filter on parent
-        parent  = "/".join(path.split("/")[:-1])
-        pattern = path.split("/")[-1].lower() + "*"
-
-    list_url = ftp_url(ip, parent + "/") if parent else ftp_url(ip, "")
-    result = subprocess.run(["curl", "-s", list_url], capture_output=True, text=True)
-    label = pattern.rstrip("*") if pattern.endswith("*") and "*" not in pattern[:-1] else pattern
-    header(f"{hostname}: /{parent}/ (filter: {label})")
-    found = False
-    for line in result.stdout.strip().splitlines():
-        parts = line.split(None, 8)
-        if len(parts) >= 9:
-            is_dir = parts[0].startswith("d")
-            size   = parts[4] if not is_dir else ""
-            name   = parts[8]
-            if fnmatch.fnmatch(name.lower(), pattern):
-                found = True
-                if is_dir:
-                    print(f"  [{name}/]")
-                else:
-                    print(f"  {name}  ({int(size):,} bytes)" if size else f"  {name}")
-    if not found:
-        print(f"  No matches for '{label}'")
-    sep()
+    run_ip = getattr(args, "run", None) or cfg.get("ultimate_ip", "")
+    ls_browse(ip, hostname, args.path or "/", run_ip=run_ip)
 
 
 def cmd_reset(args):
@@ -1591,8 +1714,9 @@ Commands:
                    ls SD/_BASIC/GH        -- lists all entries starting with GH
                    pull SD/_BASIC/GH      -- downloads matching file(s)
                    On zsh, quote wildcards if you use them: "GH*"
-  rrun    <path>   Run a file already on the Ultimate filesystem (PRG/CRT/SID/D64)
-  mount   <file>   Mount a local disk image on drive A (no reset or autorun)
+  rrun    <path>   Run a file already on the Ultimate filesystem
+  rmount  <path>   Mount a file already on the Ultimate filesystem
+  mount   <file>   Mount a local disk image on drive A (--remote for Ultimate filesystem)
   run     <path>   Run a local file or directory on the Ultimate
                    --remote: path is on the Ultimate filesystem (same as rrun)
                    Supports: .prg .crt .sid .d64 .d71 .d81 .g64 .g71
@@ -1713,9 +1837,14 @@ Examples:
     rr.add_argument("path", metavar="PATH", help="Path on Ultimate e.g. SD/_BASIC/Tetris.d64")
     rr.add_argument("--ip", metavar="IP")
 
-    mo = sub.add_parser("mount", help="Mount a local disk image on the Ultimate (no reset)")
-    mo.add_argument("path", metavar="PATH", help="Disk image file to mount")
-    mo.add_argument("--ip", metavar="IP", help="Ultimate IP (uses saved default if not given)")
+    mo = sub.add_parser("mount", help="Mount a disk image on drive A (local or remote)")
+    mo.add_argument("path", metavar="PATH", help="Local file or remote path on Ultimate")
+    mo.add_argument("--ip",     metavar="IP", help="Ultimate IP (uses saved default if not given)")
+    mo.add_argument("--remote", action="store_true", help="Path is on the Ultimate filesystem, not local")
+
+    rm = sub.add_parser("rmount", help="Mount a file already on the Ultimate filesystem")
+    rm.add_argument("path", metavar="PATH", help="Path on Ultimate e.g. SD/_BASIC/Tetris.d64")
+    rm.add_argument("--ip", metavar="IP")
 
     rst = sub.add_parser("reset", help="Reset the C64")
     rst.add_argument("--ip", metavar="IP", help="Ultimate IP (uses saved default if not given)")
@@ -1757,6 +1886,8 @@ def main():
         cmd_push(args)
     elif args.cmd == "rrun":
         cmd_rrun(args)
+    elif args.cmd == "rmount":
+        cmd_rmount(args)
     elif args.cmd == "mount":
         cmd_mount(args)
     elif args.cmd == "reset":
