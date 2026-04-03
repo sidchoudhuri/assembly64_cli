@@ -145,14 +145,26 @@ def cat_label(cat_id):
             return f"{cat_id} ({name})"
     return str(cat_id)
 
-def resolve_cat(val):
+def resolve_cat_id(val):
+    """Resolve a category name/alias/number to a numeric ID.
+    Checks CAT_IDS first, then fetches the full category list from the API."""
     key = val.lower()
     if key in CAT_IDS:
-        return CAT_IDS[key]
+        return CAT_IDS[key], CATEGORIES.get(key, key)
     try:
-        return int(val)
+        return int(val), None
     except ValueError:
-        sys.exit(f"Unknown category '{val}'. Use a number or: {', '.join(CAT_IDS)}")
+        pass
+    # Try fetching full category list
+    try:
+        data = get("search/categories")
+        if isinstance(data, list):
+            for c in data:
+                if c.get("name","").lower() == key or c.get("description","").lower() == key:
+                    return c["id"], c["name"]
+    except Exception:
+        pass
+    return None, None
 
 # ---------- Ultimate API ------------------------------------------------------
 
@@ -1245,10 +1257,37 @@ def cmd_search(args):
     has_kv   = any([args.group, args.handle, args.repo, args.cat,
                     args.date, args.after, args.before])
 
+    aql_cats = set(CATEGORIES.values())
+
+    # If --cat given, check if it's AQL-compatible or needs name search
+    if args.cat:
+        cat_id, cat_aql_name = resolve_cat_id(args.cat)
+        cat_is_aql = cat_aql_name in aql_cats if cat_aql_name else False
+
+        if not cat_is_aql and cat_id is not None:
+            # Non-AQL category -- must have a name to search
+            if not args.name:
+                print(f"  Non-AQL category requires a name: assembly64 search NAME --cat {args.cat}")
+                return
+            enc   = urllib.parse.quote(args.name.replace(" ", ""))
+            names = get(f"search/releases/{enc}/{cat_id}")
+            if not isinstance(names, list) or not names:
+                print("  No results.")
+                return
+            chosen = pick_name(names, "get details")
+            if not chosen:
+                return
+            items = get(f"search/releasegroup/{urllib.parse.quote(chosen)}/{cat_id}")
+            if not isinstance(items, list) or not items:
+                print("  No details found.")
+                return
+            pick(items, run_ip=run_ip, download=download, show_files=args.files, autodisk=getattr(args, "autodisk", False))
+            return
+
     # Name only (no filters) -- use fast name lookup endpoint
     if args.name and not has_kv:
         enc   = urllib.parse.quote(args.name.replace(" ", ""))
-        cat   = resolve_cat(args.cat) if args.cat else 1
+        cat   = resolve_cat_id(args.cat)[0] if args.cat else 1
         names = get(f"search/releases/{enc}/{cat}")
         if not isinstance(names, list) or not names:
             print("  No results.")
@@ -1401,6 +1440,21 @@ def cmd_categories(args):
     for c in data:
         by_type.setdefault(c.get("type", "other"), []).append(c)
     type_names = sorted(by_type.keys())
+
+    if getattr(args, "list", False):
+        aql_cats = set(CATEGORIES.values())
+        header("CATEGORY LIST")
+        print(f"  AQL categories (use with --cat):")
+        print(f"  {' '.join(sorted(CAT_IDS.keys()))}")
+        sep()
+        print(f"  All categories (from API):")
+        for t in type_names:
+            cats = sorted(by_type[t], key=lambda x: x["id"])
+            names = "  ".join(c["name"] for c in cats)
+            aql_flag = ""
+            print(f"  {t:<15} {names}")
+        sep()
+        return
 
     # Show types
     header("CATEGORIES")
@@ -2975,6 +3029,7 @@ def build_parser():
     pr.add_argument("name", nargs="?", metavar="TYPE")
 
     ca = sub.add_parser("cats", aliases=["cat", "category"], help="Browse categories")
+    ca.add_argument("--list",     action="store_true", help="List all categories and exit")
     ca.add_argument("--download", action="store_true")
     ca.add_argument("--run",      metavar="IP")
 
