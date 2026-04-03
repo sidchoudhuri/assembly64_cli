@@ -146,22 +146,23 @@ def cat_label(cat_id):
     return str(cat_id)
 
 def resolve_cat_id(val):
-    """Resolve a category name/alias/number to a numeric ID.
-    Checks CAT_IDS first, then fetches the full category list from the API."""
+    """Resolve a --cat value to (cat_id, repo_type).
+    Checks CAT_IDS first, then fetches full category list."""
     key = val.lower()
     if key in CAT_IDS:
-        return CAT_IDS[key], CATEGORIES.get(key, key)
+        return CAT_IDS[key], key  # repo type same as key for known cats
     try:
         return int(val), None
     except ValueError:
         pass
-    # Try fetching full category list
     try:
         data = get("search/categories")
         if isinstance(data, list):
             for c in data:
-                if c.get("name","").lower() == key or c.get("description","").lower() == key:
-                    return c["id"], c["name"]
+                if (c.get("name","").lower() == key or
+                    c.get("description","").lower() == key or
+                    c.get("type","").lower() == key):
+                    return c["id"], c.get("type", key)
     except Exception:
         pass
     return None, None
@@ -712,8 +713,8 @@ def get_flipinfo(item_id, category):
 
 # ---------- Action prompt -----------------------------------------------------
 
-def action_prompt(run_ip, flipinfo=None):
-    """Ask user what to do. Returns ('run', ip), ('autodisk', ip), ('download',), or None."""
+def action_prompt(run_ip, flipinfo=None, can_back=False):
+    """Ask user what to do. Returns ('run', ip), ('autodisk', ip), ('download',), 'back', or None."""
     cfg = load_config()
     saved_ip     = cfg.get("ultimate_ip", "")
     effective_ip = run_ip or saved_ip
@@ -728,20 +729,25 @@ def action_prompt(run_ip, flipinfo=None):
         options.append(("run",      "Run on Ultimate (you'll be asked for IP)"))
         if has_flip:
             options.append(("autodisk", "Run with auto disk flip (you'll be asked for IP)"))
-    options.append(("download", "Download to current directory"))
-    options.append(("quit",     "Quit"))
+    options.append(("download", "Download"))
+    if can_back:
+        options.append(("refine",   "Refine query"))
 
     print()
     for i, (_, label) in enumerate(options, 1):
         print(f"  [{i}] {label}")
+    if can_back:
+        print(f"  b=back  q=quit")
     print()
-    choice = input("  Choose action (or Enter to quit): ").strip()
-    if not choice:
+    choice = input("  Choose action (or Enter to quit): ").strip().lower()
+    if not choice or choice == "q":
         return None
+    if choice == "b" and can_back:
+        return "back"
     try:
         key, _ = options[int(choice) - 1]
-        if key == "quit":
-            return None
+        if key == "refine":
+            return "refine"
         if key == "download":
             return ("download",)
         if key in ("run", "autodisk"):
@@ -977,7 +983,7 @@ def handle_files(iid, cat, entries, run_ip, download, flipinfo=None, item_name=N
             write_flip_file(flipinfo, disk_filenames, target_dir=target_dir, item_id=item_id)
 
 
-def show_item(item, run_ip=None, download=False, show_files=False, autodisk=False):
+def show_item(item, run_ip=None, download=False, show_files=False, autodisk=False, can_back=False):
     name     = item.get("name", "-")
     iid      = item.get("id", "")
     group    = item.get("group") or ""
@@ -1046,9 +1052,11 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
     for i, f in enumerate(entries, 1):
         print(f"    {i:>3}. {f.get('path','')}  ({f.get('size',0):,} bytes)")
 
-    action = action_prompt(run_ip=None, flipinfo=flipinfo)
+    action = action_prompt(run_ip=None, flipinfo=flipinfo, can_back=can_back)
     if action is None:
         return
+    if action in ("back", "refine"):
+        return action
     if action[0] in ("run", "autodisk"):
         ip = action[1]
         fi = flipinfo if action[0] == "autodisk" else None
@@ -1129,7 +1137,7 @@ def read_input(prompt):
         return input("").strip()
 
 
-def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=False):
+def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=False, can_back=False):
     """
     Display a paginated list. 40 char wide C64 screen layout.
     Returns index, None, "up", "mkdir", "rename", or "delete".
@@ -1162,12 +1170,16 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=F
             actions += ["r=rename", "d=delete"]
         if can_upload:
             actions.append("u=upload")
+        if can_back:
+            actions.append("b=back")
         actions.append("q=quit")
         actions_str = "  ".join(actions)
         choice = read_input(f"  Number to select,  {actions_str}: ").lower()
 
         if not choice or choice == "q":
             return None
+        if choice == "b":
+            return "back" if can_back else None
         if choice in ("^", "up") and can_modify:
             return "up"
         if choice == "m" and can_mkdir:
@@ -1179,7 +1191,7 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=F
         if choice == "u" and can_upload:
             return "upload"
 
-        if choice in ("p", "b") or choice == "[D":
+        if choice == "p" or choice == "[D":
             offset = max(0, offset - PAGE_SIZE)
             continue
         if choice == "n":
@@ -1194,7 +1206,7 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=F
         except ValueError:
             print("  Invalid")
 
-def pick(items, run_ip=None, download=False, show_files=False, autodisk=False):
+def pick(items, run_ip=None, download=False, show_files=False, autodisk=False, can_back=False):
     print(f"\n  {len(items)} result(s):\n")
     rows = []
     for i, item in enumerate(items, 1):
@@ -1208,18 +1220,23 @@ def pick(items, run_ip=None, download=False, show_files=False, autodisk=False):
         date_str = released or (str(year) if year else "")
         extra    = "  ".join(filter(None, [credits, date_str, cat]))
         rows.append(f"  {i:>3}. {name}  [{extra}]")
-    idx = paginated_list(rows, "Enter number to view details")
+    idx = paginated_list(rows, "Enter number to view details", can_back=can_back)
     if idx is None or idx in ("up", "mkdir", "rename", "delete", "upload"):
-        return
-    show_item(items[idx], run_ip=run_ip, download=download, show_files=show_files, autodisk=autodisk)
+        return False
+    if idx == "back":
+        return "back"
+    show_item(items[idx], run_ip=run_ip, download=download, show_files=show_files, autodisk=autodisk, can_back=can_back)
+    return True
 
 
-def pick_name(names, prompt="select"):
+def pick_name(names, prompt="select", can_back=False):
     print(f"\n  {len(names)} match(es):\n")
     rows = [f"  {i:>3}. {n}" for i, n in enumerate(names, 1)]
-    idx  = paginated_list(rows, f"Enter number to {prompt}")
+    idx  = paginated_list(rows, f"Enter number to {prompt}", can_back=can_back)
     if idx is None or idx in ("up", "mkdir", "rename", "delete", "upload"):
         return None
+    if idx == "back":
+        return "back"
     return names[idx]
 
 # ---------- AQL ---------------------------------------------------------------
@@ -1238,8 +1255,11 @@ def build_query(args):
     if hasattr(args, "repo") and args.repo:
         parts.append(f"repo:{args.repo}")
     if hasattr(args, "cat") and args.cat:
-        key = args.cat.lower()
-        parts.append(f"category:{CATEGORIES.get(key, args.cat)}")
+        _, repo_type = resolve_cat_id(args.cat)
+        if repo_type:
+            parts.append(f"repo:{repo_type}")
+        else:
+            parts.append(f"repo:{args.cat}")
     if hasattr(args, "date") and args.date:
         parts.append(f"date:{args.date}")
     if hasattr(args, "after") and args.after:
@@ -1256,33 +1276,6 @@ def cmd_search(args):
     download = getattr(args, "download", False)
     has_kv   = any([args.group, args.handle, args.repo, args.cat,
                     args.date, args.after, args.before])
-
-    aql_cats = set(CATEGORIES.values())
-
-    # If --cat given, check if it's AQL-compatible or needs name search
-    if args.cat:
-        cat_id, cat_aql_name = resolve_cat_id(args.cat)
-        cat_is_aql = cat_aql_name in aql_cats if cat_aql_name else False
-
-        if not cat_is_aql and cat_id is not None:
-            # Non-AQL category -- must have a name to search
-            if not args.name:
-                print(f"  Non-AQL category requires a name: assembly64 search NAME --cat {args.cat}")
-                return
-            enc   = urllib.parse.quote(args.name.replace(" ", ""))
-            names = get(f"search/releases/{enc}/{cat_id}")
-            if not isinstance(names, list) or not names:
-                print("  No results.")
-                return
-            chosen = pick_name(names, "get details")
-            if not chosen:
-                return
-            items = get(f"search/releasegroup/{urllib.parse.quote(chosen)}/{cat_id}")
-            if not isinstance(items, list) or not items:
-                print("  No details found.")
-                return
-            pick(items, run_ip=run_ip, download=download, show_files=args.files, autodisk=getattr(args, "autodisk", False))
-            return
 
     # Name only (no filters) -- use fast name lookup endpoint
     if args.name and not has_kv:
@@ -1427,6 +1420,11 @@ def cmd_presets(args):
         print(f"\n  Use:  assembly64 presets \"<type>\"")
 
 
+class _JumpSubcat(Exception): pass
+class _JumpCategory(Exception): pass
+class _JumpAll(Exception): pass
+
+
 def cmd_categories(args):
     run_ip   = getattr(args, "run", None)
     download = getattr(args, "download", False)
@@ -1435,179 +1433,245 @@ def cmd_categories(args):
         print("  Could not fetch categories.")
         return
 
-    # Group by type
     by_type = {}
     for c in data:
         by_type.setdefault(c.get("type", "other"), []).append(c)
     type_names = sorted(by_type.keys())
 
     if getattr(args, "list", False):
-        aql_cats = set(CATEGORIES.values())
         header("CATEGORY LIST")
-        print(f"  AQL categories (use with --cat):")
-        print(f"  {' '.join(sorted(CAT_IDS.keys()))}")
+        print(f"  All categories (repo:type in AQL):")
         sep()
-        print(f"  All categories (from API):")
         for t in type_names:
             cats = sorted(by_type[t], key=lambda x: x["id"])
-            names = "  ".join(c["name"] for c in cats)
-            aql_flag = ""
-            print(f"  {t:<15} {names}")
+            for c in cats:
+                print(f"  id:{c['id']:<4} repo:{t:<15} {c['description']}")
         sep()
         return
 
-    # Show types
-    header("CATEGORIES")
-    for i, t in enumerate(type_names, 1):
-        print(f"  {i:>3}. {t}  ({len(by_type[t])} categories)")
-    sep()
-    print()
-    choice = input("  Enter number to browse category type (or Enter to quit): ").strip()
-    if not choice:
-        return
-    try:
-        chosen_type = type_names[int(choice) - 1]
-    except (ValueError, IndexError):
-        print("  Invalid choice.")
-        return
+    def cat_header(c):
+        sep()
+        print(f"  [{c['id']:>3}]  {c['description']}  ({c['name']})")
+        sep()
 
-    # Show categories in that type
-    cats = sorted(by_type[chosen_type], key=lambda x: x["id"])
-    header(f"  {chosen_type}")
-    rows = [f"  {i:>3}. [{c['id']:>3}]  {c['description']}  ({c['name']})"
-            for i, c in enumerate(cats, 1)]
-    idx = paginated_list(rows, "Enter number to search this category")
-    if idx is None:
-        return
-
-    chosen_cat = cats[idx]
-    cat_name   = chosen_cat["description"]
-    cat_id     = chosen_cat["id"]
-    cat_aql    = chosen_cat["name"]
-
-    # Check if this category supports AQL (csdb-style names)
-    aql_cats   = set(CATEGORIES.values())
-    aql_ok     = cat_aql in aql_cats
-
-    if not aql_ok:
-        # Non-AQL category -- use name search path only
-        while True:
-            print(f"\n  {cat_name}  (id:{cat_id})")
-            print(f"  Using name search (id:{cat_id})")
-            term = input(f"  Name to search (or Enter to quit): ").strip()
-            if not term:
-                return
-            enc   = urllib.parse.quote(term.replace(" ", ""))
-            names = get(f"search/releases/{enc}/{cat_id}")
-            if not isinstance(names, list) or not names:
-                print("  No results.")
-                continue
-            chosen = pick_name(names, "get details")
-            if not chosen:
-                continue
-            items = get(f"search/releasegroup/{urllib.parse.quote(chosen)}/{cat_id}")
-            if not isinstance(items, list) or not items:
-                print("  No details found.")
-                continue
-            pick(items, run_ip=run_ip, download=download)
-        return
-
-    # AQL query builder
-    filters = {}
-
-    def build_cat_query():
-        parts = [f"category:{cat_aql}"]
-        for field, val in filters.items():
-            parts.append(f"{field}:{q_val(val)}")
-        return " ".join(parts)
-
-    def show_query():
-        q = build_cat_query()
-        print(f"\n  {cat_name}")
-        print(f"  Query: {q}")
-
-    while True:
-        show_query()
+    def show_filter_prompt(cat_name, cat_id, cat_name_short, query, multi_cat):
+        sep()
+        print(f"  [{cat_id:>3}]  {cat_name}  ({cat_name_short})")
+        sep()
+        print(f"  Query: {query}")
         print(f"  n=name  h=handle  g=group")
-        print(f"  a=after  b=before  o=order  c=clear")
-        print(f"  Enter=search  q=quit")
-        key = input("  Filter: ").strip().lower()
+        print(f"  f=after  b=before  o=order  c=clear")
+        if multi_cat:
+            print(f"  Back to: s=subcategory  t=category  a=all")
+        else:
+            print(f"  Back to: t=category  a=all")
+        print(f"  b=back  q=quit")
 
-        if key == "q":
-            return
-        elif key == "c":
-            filters = {}
-            continue
-        elif key == "n":
-            val = input("  Name: ").strip()
-            if val: filters["name"] = val
-        elif key == "h":
-            val = input("  Handle: ").strip()
-            if val: filters["handle"] = val
-        elif key == "g":
-            val = input("  Group: ").strip()
-            if val: filters["group"] = val
-        elif key == "a":
-            val = input("  After (YYYYMMDD): ").strip()
-            if val: filters["date:>"] = val
-        elif key == "b":
-            val = input("  Before (YYYYMMDD): ").strip()
-            if val: filters["date:<"] = val
-        elif key == "o":
-            print("  [1] Rating (default)")
-            print("  [2] Newest first")
-            print("  [3] Oldest first")
-            oc = input("  Order: ").strip()
-            if oc == "1":   filters.pop("order", None)
-            elif oc == "2": filters["order"] = "date_desc"
-            elif oc == "3": filters["order"] = "date_asc"
-        elif key == "":
-            # Build and run query
-            query  = build_cat_query()
-            offset = 0
-            limit  = 50
+    def show_results_header(cat_name, cat_id, cat_name_short, query, offset, shown, has_more, multi_cat):
+        sep()
+        print(f"  [{cat_id:>3}]  {cat_name}  ({cat_name_short})")
+        sep()
+        print(f"  Query: {query}")
+        if offset == 0 and has_more:
+            print(f"  Found 50+ results")
+        elif has_more:
+            print(f"  Results {offset+1}-{shown}  (more available)")
+        else:
+            print(f"  Results {offset+1}-{shown}")
+        print()
 
+    # Top level: all categories
+    while True:
+        try:
+            header("CATEGORIES")
+            for i, t in enumerate(type_names, 1):
+                print(f"  {i:>3}. {t}  ({len(by_type[t])} categories)")
+            sep()
+            choice = input("  Number to browse,  q=quit: ").strip().lower()
+            if choice == "q":
+                return
+            if choice in ("s", "t", "a"):
+                continue
+            try:
+                chosen_type = type_names[int(choice) - 1]
+            except (ValueError, IndexError):
+                print("  Invalid choice.")
+                continue
+
+            cats = sorted(by_type[chosen_type], key=lambda x: x["id"])
+            multi_cat = len(cats) > 1
+
+            # If only one category, go straight in
+            if not multi_cat:
+                chosen_cat = cats[0]
+            else:
+                chosen_cat = None
+
+            # Category type list (only shown for multi-cat repos)
             while True:
-                print(f"  Searching ...", flush=True)
-                items = aql(query, offset=offset, limit=limit)
-                if not items:
-                    if offset == 0:
-                        print("  No results.")
-                    else:
-                        print("  No more results.")
+                try:
+                    if multi_cat and chosen_cat is None:
+                        header(f"  {chosen_type}")
+                        for i, c in enumerate(cats, 1):
+                            print(f"  {i:>3}. [{c['id']:>3}]  {c['description']}  ({c['name']})")
+                        sep()
+                        choice2 = input("  Number to select,  b=back  a=all  q=quit: ").strip().lower()
+                        if choice2 == "q":
+                            return
+                        if choice2 in ("b", "t", "a"):
+                            break
+                        if choice2 == "s":
+                            continue
+                        try:
+                            idx = int(choice2) - 1
+                            if not (0 <= idx < len(cats)):
+                                print("  Invalid number.")
+                                continue
+                        except ValueError:
+                            print("  Invalid input.")
+                            continue
+                        chosen_cat = cats[idx]
+
+                    cat_name       = chosen_cat["description"]
+                    cat_type       = chosen_cat["type"]
+                    cat_name_short = chosen_cat["name"]
+                    cat_id         = chosen_cat["id"]
+
+                    filters = {}
+
+                    def build_cat_query():
+                        parts = [f"repo:{cat_type}"]
+                        if cat_name_short in set(CATEGORIES.values()):
+                            parts.append(f"category:{cat_name_short}")
+                        for field, val in filters.items():
+                            parts.append(f"{field}:{q_val(val)}")
+                        return " ".join(parts)
+
+                    # Subcategory filter loop
+                    while True:
+                        try:
+                            q = build_cat_query()
+                            show_filter_prompt(cat_name, cat_id, cat_name_short, q, multi_cat)
+                            key = input("  Filter: ").strip().lower()
+
+                            if key == "q":
+                                return
+                            elif key == "b":
+                                if multi_cat:
+                                    chosen_cat = None
+                                break
+                            elif key == "s" and multi_cat:
+                                filters = {}
+                                continue
+                            elif key == "t":
+                                raise _JumpCategory()
+                            elif key == "a":
+                                raise _JumpAll()
+                            elif key == "c":
+                                filters = {}
+                            elif key == "n":
+                                val = input("  Name: ").strip()
+                                if val: filters["name"] = val
+                            elif key == "h":
+                                val = input("  Handle: ").strip()
+                                if val: filters["handle"] = val
+                            elif key == "g":
+                                val = input("  Group: ").strip()
+                                if val: filters["group"] = val
+                            elif key == "f":
+                                val = input("  After (YYYYMMDD): ").strip()
+                                if val: filters["date:>"] = val
+                            elif key == "o":
+                                print("  [1] Rating (default)")
+                                print("  [2] Newest first")
+                                print("  [3] Oldest first")
+                                oc = input("  Order: ").strip()
+                                if oc == "1":   filters.pop("order", None)
+                                elif oc == "2": filters["order"] = "date_desc"
+                                elif oc == "3": filters["order"] = "date_asc"
+                            elif key == "":
+                                query  = build_cat_query()
+                                offset = 0
+                                limit  = 50
+
+                                while True:
+                                    try:
+                                        print(f"  Searching ...", flush=True)
+                                        items = aql(query, offset=offset, limit=limit)
+                                        if not items:
+                                            print("  No results." if offset == 0 else "  No more results.")
+                                            break
+
+                                        if "order" not in filters:
+                                            items.sort(key=lambda x: float(x.get("siteRating") or x.get("rating") or 0), reverse=True)
+
+                                        shown    = offset + len(items)
+                                        has_more = len(items) == limit
+
+                                        show_results_header(cat_name, cat_id, cat_name_short, query, offset, shown, has_more, multi_cat)
+
+                                        options = [("view", "[1] View results")]
+                                        if has_more:
+                                            options.append(("next", f"[{len(options)+1}] Next {limit} ->"))
+                                        if offset > 0:
+                                            options.append(("prev", f"[{len(options)+1}] <- Prev {limit}"))
+                                        options.append(("refine", f"[{len(options)+1}] Refine query"))
+                                        for _, label in options:
+                                            print(f"  {label}")
+                                        if multi_cat:
+                                            print(f"  Back to: s=subcategory  t=category  a=all")
+                                        else:
+                                            print(f"  Back to: t=category  a=all")
+                                        print(f"  b=back  q=quit")
+                                        print()
+                                        ch = input("  Choose: ").strip().lower()
+
+                                        if ch == "q":
+                                            return
+                                        elif ch == "b":
+                                            break
+                                        elif ch == "s" and multi_cat:
+                                            raise _JumpSubcat()
+                                        elif ch == "t":
+                                            raise _JumpCategory()
+                                        elif ch == "a":
+                                            raise _JumpAll()
+                                        else:
+                                            try:
+                                                n = int(ch) - 1
+                                                key2, _ = options[n]
+                                            except (ValueError, IndexError):
+                                                continue
+                                            if key2 == "view":
+                                                pick(items, run_ip=run_ip, download=download, can_back=True)
+                                            elif key2 == "next":
+                                                offset += limit
+                                            elif key2 == "prev":
+                                                offset = max(0, offset - limit)
+                                            elif key2 == "refine":
+                                                break
+                                    except (_JumpSubcat, _JumpCategory, _JumpAll):
+                                        raise
+
+                        except _JumpSubcat:
+                            filters = {}
+                            continue
+                        except (_JumpCategory, _JumpAll):
+                            raise
+
+                    if not multi_cat:
+                        break  # single-cat repo: b goes back to CATEGORIES
+
+                except _JumpCategory:
+                    chosen_cat = None
+                    if not multi_cat:
+                        raise _JumpAll()
                     break
+                except _JumpAll:
+                    raise
 
-                # Client-side sort by rating unless order filter set
-                if "order" not in filters:
-                    items.sort(key=lambda x: float(x.get("siteRating") or x.get("rating") or 0), reverse=True)
-
-                shown = offset + len(items)
-                has_more = len(items) == limit
-
-                print(f"\n  Query: {query}")
-                print(f"  Showing {offset+1}-{shown}" + (" (more available)" if has_more else ""))
-                print()
-                print(f"  [1] View results")
-                if has_more:
-                    print(f"  [2] Next {limit} ->")
-                if offset > 0:
-                    print(f"  [3] <- Prev {limit}")
-                print(f"  [4] Refine query")
-                print(f"  q=quit")
-                print()
-                ch = input("  Choose: ").strip().lower()
-
-                if ch == "q":
-                    return
-                elif ch == "1":
-                    pick(items, run_ip=run_ip, download=download)
-                elif ch == "2" and has_more:
-                    offset += limit
-                elif ch == "3" and offset > 0:
-                    offset = max(0, offset - limit)
-                elif ch == "4":
-                    break  # back to filter loop
-                # else loop
+        except _JumpAll:
+            continue
 
 
 def parse_flip_file(path):
@@ -2921,6 +2985,11 @@ SEARCH FLAGS
   --date / --after / --before
   --order asc|desc  --limit N
   --download  --run IP  --autodisk
+
+SEARCH NOTES
+  Results fetched 50 at a time.
+  Use Next to page through results.
+  Use cats to browse all repos.
 
 FILE TYPES
   .prg .crt   DMA load and run
