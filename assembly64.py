@@ -1428,10 +1428,38 @@ def cmd_categories(args):
 
     chosen_cat = cats[idx]
     cat_name   = chosen_cat["description"]
+    cat_id     = chosen_cat["id"]
     cat_aql    = chosen_cat["name"]
 
+    # Check if this category supports AQL (csdb-style names)
+    aql_cats   = set(CATEGORIES.values())
+    aql_ok     = cat_aql in aql_cats
+
+    if not aql_ok:
+        # Non-AQL category -- use name search path only
+        while True:
+            print(f"\n  {cat_name}  (id:{cat_id})")
+            print(f"  Using name search (id:{cat_id})")
+            term = input(f"  Name to search (or Enter to quit): ").strip()
+            if not term:
+                return
+            enc   = urllib.parse.quote(term.replace(" ", ""))
+            names = get(f"search/releases/{enc}/{cat_id}")
+            if not isinstance(names, list) or not names:
+                print("  No results.")
+                continue
+            chosen = pick_name(names, "get details")
+            if not chosen:
+                continue
+            items = get(f"search/releasegroup/{urllib.parse.quote(chosen)}/{cat_id}")
+            if not isinstance(items, list) or not items:
+                print("  No details found.")
+                continue
+            pick(items, run_ip=run_ip, download=download)
+        return
+
     # AQL query builder
-    filters = {}  # key -> (aql_field, value)
+    filters = {}
 
     def build_cat_query():
         parts = [f"category:{cat_aql}"]
@@ -1480,11 +1508,10 @@ def cmd_categories(args):
             elif oc == "2": filters["order"] = "date_desc"
             elif oc == "3": filters["order"] = "date_asc"
         elif key == "":
-            # Search with pagination
-            query   = build_cat_query()
-            offset  = 0
-            limit   = 50
-            total   = None
+            # Build and run query
+            query  = build_cat_query()
+            offset = 0
+            limit  = 50
 
             while True:
                 print(f"  Searching ...", flush=True)
