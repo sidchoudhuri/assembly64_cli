@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+VERSION = "1.0.3"
+BUILD   = "2026-04-03-3"
 
 import sys
 import os
@@ -3070,6 +3072,7 @@ def build_parser():
     )
     p.add_argument("--full-help", "--fullhelp", action="store_true", help="Show full help")
     p.add_argument("--examples",  action="store_true", help="Show examples")
+    p.add_argument("--version",   action="store_true", help="Show version")
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("help", help="Show full help")
@@ -3176,6 +3179,9 @@ def main():
         sys.exit(0)
 
     # Handle --full-help, --fullhelp, --examples before subcommand parsing
+    if "--version" in sys.argv:
+        print(f"  assembly64  v{VERSION}  (build {BUILD})")
+        sys.exit(0)
     if "--full-help" in sys.argv or "--fullhelp" in sys.argv:
         print(FULL_HELP)
         print(EXAMPLES)
