@@ -3,8 +3,19 @@ A command-line C64 scene lookup tool for the 1541 Ultimate II/II+L, Ultimate64/U
 - [Code notes](code_notes.md)
 - [Examples](#examples)
 
-## Setup
+## Features
+- Full Assembly64 API search with AQL query builder
+- Multi-device management
+- Full Ultimate64 file system browser with upload/download
+- Local filesystem browser
+- Multi-disk auto-flip
+- SID player integration
+- Charts, presets, categories
+- Config system with dirs and devices
 
+Please send any feature requests or report any issues [here](https://github.com/sidchoudhuri/assembly64_cli/issues)
+
+## Setup
 Requires Python 3. No dependencies beyond the standard library.
 ```bash
 git clone https://github.com/yourusername/assembly64.git
