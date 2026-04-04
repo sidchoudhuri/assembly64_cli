@@ -129,7 +129,7 @@ $
   ```
 ## Examples
 
-### Looking up the first 50 demos from Fairlight in descending order (newest first)
+### Looking up the first 50 demos from CSDB by Fairlight in descending order (newest first)
 <details>
   <summary>$ ./assembly64.py search --group fairlight --cat demos --order desc</summary>
   
@@ -320,7 +320,7 @@ $
 
 ### Using the Remote File Browser to upload a directory to the Ultimate file system
 <details>
-  <summary>$ assembly64 remote</summary>
+  <summary>$ ./assembly64.py remote</summary>
   
 ```
 --------------------------------------------------------------
