@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 VERSION = "1.0.3"
-BUILD   = "2026-04-03-3"
+BUILD   = "2026-04-05-1"
 
 import sys
 import os
@@ -10,7 +10,7 @@ import urllib.request
 import urllib.parse
 
 BASE         = "https://hackerswithstyle.se/leet/"
-HEADERS      = {"client-id": "swagger", "Accept": "application/json"}
+HEADERS      = {"client-id": "assembly64_cli", "Accept": "application/json"}
 CONFIG_DIR  = os.path.expanduser("~/.assembly64")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
@@ -359,7 +359,7 @@ def run_on_ultimate(filename, data, ip):
 def fetch_file_data(item_id, cat, f):
     file_id = f.get("id")
     url     = BASE + f"search/bin/{urllib.parse.quote(str(item_id))}/{cat}/{file_id}"
-    req     = urllib.request.Request(url, headers={"client-id": "swagger"})
+    req     = urllib.request.Request(url, headers={"client-id": "assembly64_cli"})
     with urllib.request.urlopen(req, timeout=30) as r:
         return r.read()
 
