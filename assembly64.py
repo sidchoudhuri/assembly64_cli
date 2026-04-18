@@ -55,10 +55,18 @@ DISK_TYPES = {".d64": "d64", ".g64": "g64", ".d71": "d71", ".g71": "g71", ".d81"
 def load_config():
     try:
         with open(CONFIG_FILE) as f:
-            return json.load(f)
+            config = json.load(f)
     except Exception:
-        return {}
+        config = {}
 
+    # Check if ultimate_ip is missing or blank
+    if not config.get("ultimate_ip"):
+        env_ip = os.environ.get("C64_ULTIMATE_IP")
+        if env_ip:
+            config["ultimate_ip"] = env_ip
+
+    return config
+    
 def save_config(cfg):
     os.makedirs(CONFIG_DIR, exist_ok=True)
     with open(CONFIG_FILE, "w") as f:
