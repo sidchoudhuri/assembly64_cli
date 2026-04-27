@@ -9,6 +9,7 @@ import argparse
 import urllib.request
 import urllib.parse
 
+# https://github.com/sidchoudhuri/assembly64_cli
 BASE         = "https://hackerswithstyle.se/leet/"
 HEADERS      = {"client-id": "assembly64_cli", "Accept": "application/json"}
 CONFIG_DIR  = os.path.expanduser("~/.assembly64")
