@@ -417,7 +417,7 @@ def prompt_download_dir(item_name, item_id, category=None, multi_file=False):
     for i, (_, label) in enumerate(options, 1):
         print(f"  [{i}] {label}")
 
-    # Show tip if dirs not configured
+    # Show tool tip if dirs not configured
     if not demos_dir and not sids_dir:
         print()
         print("  ** assembly64 config --help to set dirs")
