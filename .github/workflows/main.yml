@@ -33,7 +33,7 @@ jobs:
         uses: Nuitka/Nuitka-Action@main
         with:
           nuitka-version: main
-          script-name: assembly64_cli.py
+          script-name: assembly64.py
           mode: onefile
           output-file: assembly64_cli-${{ runner.os }}
 
@@ -44,5 +44,4 @@ jobs:
           name: Release v${{ github.run_number }}
           files: |
             build/*
-            sidviz.prg
           
