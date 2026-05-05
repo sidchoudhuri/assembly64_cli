@@ -18,14 +18,16 @@ A command-line C64 scene lookup tool for the 1541 Ultimate II/II+L, Ultimate64/U
 Please send any feature requests or report any issues [here](https://github.com/sidchoudhuri/assembly64_cli/issues)
 
 ## Setup
-Requires Python 3. No dependencies beyond the standard library.
+### [Precompiled binaries](https://github.com/sidchoudhuri/assembly64_cli) for Linux, Mac. and Windows now available. Python not required.
+
+Script execution requires Python 3. No dependencies beyond the standard library.
 ```bash
 git clone https://github.com/yourusername/assembly64.git
 cd assembly64
 chmod +x assembly64.py
 ```
 
-Optionally add to your PATH:
+Optionally add the executable or script to your PATH:
 ```bash
 cp assembly64.py ~/.local/bin/assembly64.py
 ```
