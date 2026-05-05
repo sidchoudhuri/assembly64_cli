@@ -7,7 +7,8 @@ A command-line C64 scene lookup tool for the 1541 Ultimate II/II+L, Ultimate64/U
 ## Features
 - Full Assembly64 API search with AQL query builder
 - Multi-device management
-- Full Ultimate64 file system browser with upload/download
+- Run anything from the local or U64 file system or directly from a scene repository 
+- Full Ultimate64 file system management with upload/download, folder management
 - Local filesystem browser
 - Multi-disk auto-flip
 - SID player integration
