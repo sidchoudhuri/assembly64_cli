@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-VERSION = "1.0.3"
-BUILD   = "2026-04-05-1"
+VERSION = "1.0.4"
+BUILD   = "2026-06-05-1"
 
 import sys
 import os
