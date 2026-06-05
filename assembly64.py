@@ -1370,7 +1370,7 @@ def cmd_charts(args):
     def show_chart(chart_type, items):
         if not items:
             print(f"  No entries for chart '{chart_type}'.")
-            return
+            return False
         header(f"CHART: {chart_type.upper()}")
         rows = []
         for i, item in enumerate(items, 1):
@@ -1384,9 +1384,12 @@ def cmd_charts(args):
             extra    = "  ".join(filter(None, [credits, date_str]))
             rating_str = f"*{rating:.2f}" if isinstance(rating, float) else f"*{rating}"
             rows.append(f"  {i:>3}. {name}  [{extra}]  {rating_str}")
-        idx = paginated_list(rows, "Enter number to view details")
+        idx = paginated_list(rows, "Enter number to view details", can_back=True)
+        if idx == "back":
+            return True
         if idx is not None:
             show_item(items[idx], run_ip=run_ip, download=download)
+        return False
 
     if args.name:
         chart_type = args.name.lower()
@@ -1396,13 +1399,14 @@ def cmd_charts(args):
             return
         show_chart(chart_type, fetch_chart(chart_type))
     else:
-        header("CHARTS")
-        rows = [f"  {i:>3}. {name}" for i, name in enumerate(CHART_TYPES, 1)]
-        idx = paginated_list(rows, "Enter number to view chart")
-        if idx is None:
-            return
-        chart_type = CHART_TYPES[idx]
-        show_chart(chart_type, fetch_chart(chart_type))
+        type_rows = [f"  {i:>3}. {name}" for i, name in enumerate(CHART_TYPES, 1)]
+        while True:
+            header("CHARTS")
+            idx = paginated_list(type_rows, "Enter number to view chart")
+            if idx is None:
+                return
+            chart_type = CHART_TYPES[idx]
+            show_chart(chart_type, fetch_chart(chart_type))
 
 
 def cmd_presets(args):
