@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-VERSION = "1.0.3"
-BUILD   = "2026-04-05-1"
+VERSION = "1.0.4"
+BUILD   = "2026-06-05-1"
 
 import sys
 import os
@@ -1351,56 +1351,62 @@ def cmd_sid(args):
     pick(items, run_ip=run_ip, download=download, show_files=args.files, autodisk=getattr(args, "autodisk", False))
 
 
+CHART_TYPES = ["demos", "onefiledemos", "music", "graphics", "games", "tools"]
+
+
 def cmd_charts(args):
     run_ip   = getattr(args, "run", None)
     download = getattr(args, "download", False)
-    data     = get("charts")
-    if not isinstance(data, list) or not data:
-        print("  No charts available.")
-        return
 
-    chart_names = [c.get("name", "") for c in data if c.get("name")]
+    def fetch_chart(chart_type):
+        data = get(f"charts/{chart_type}")
+        # API returns a list of entries directly
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return data.get("entries", [])
+        return []
 
-    def show_chart(chart):
-        items = chart.get("entries", [])
-        header(f"CHART: {chart.get('name','')}")
+    def show_chart(chart_type, items):
+        if not items:
+            print(f"  No entries for chart '{chart_type}'.")
+            return False
+        header(f"CHART: {chart_type.upper()}")
         rows = []
         for i, item in enumerate(items, 1):
-            name    = item.get("name", "-")
-            group   = item.get("group") or ""
-            handle  = item.get("handle") or ""
-            year    = item.get("year") or ""
-            rating  = item.get("siteRating") or item.get("rating") or ""
-            credits = group or handle
+            name     = item.get("name", "-")
+            group    = item.get("group") or ""
+            handle   = item.get("handle") or ""
+            year     = item.get("year") or ""
+            rating   = item.get("siteRating") or item.get("rating") or ""
+            credits  = group or handle
             date_str = str(year) if year else ""
-            extra   = "  ".join(filter(None, [credits, date_str]))
+            extra    = "  ".join(filter(None, [credits, date_str]))
             rating_str = f"*{rating:.2f}" if isinstance(rating, float) else f"*{rating}"
             rows.append(f"  {i:>3}. {name}  [{extra}]  {rating_str}")
-        idx = paginated_list(rows, "Enter number to view details")
+        idx = paginated_list(rows, "Enter number to view details", can_back=True)
+        if idx == "back":
+            return True
         if idx is not None:
             show_item(items[idx], run_ip=run_ip, download=download)
+        return False
 
     if args.name:
-        chart = next((c for c in data if c.get("name","").lower() == args.name.lower()), None)
-        if not chart:
+        chart_type = args.name.lower()
+        if chart_type not in CHART_TYPES:
             print(f"  Chart '{args.name}' not found.")
-            print(f"  Available: {', '.join(chart_names)}")
+            print(f"  Available: {', '.join(CHART_TYPES)}")
             return
-        show_chart(chart)
+        show_chart(chart_type, fetch_chart(chart_type))
     else:
-        header("AVAILABLE CHARTS")
-        for i, name in enumerate(chart_names, 1):
-            print(f"  {i:>3}. {name}")
-        sep()
-        print()
-        choice = input("  Enter number to view chart (or Enter to quit): ").strip()
-        if not choice:
-            return
-        try:
-            chart = data[int(choice) - 1]
-            show_chart(chart)
-        except (ValueError, IndexError):
-            print("  Invalid choice.")
+        type_rows = [f"  {i:>3}. {name}" for i, name in enumerate(CHART_TYPES, 1)]
+        while True:
+            header("CHARTS")
+            idx = paginated_list(type_rows, "Enter number to view chart")
+            if idx is None:
+                return
+            chart_type = CHART_TYPES[idx]
+            show_chart(chart_type, fetch_chart(chart_type))
 
 
 def cmd_presets(args):
@@ -2972,7 +2978,7 @@ hackerswithstyle.se/leet/
 COMMANDS
   search [query]   Search releases
   sid <query>      Search HVSC SIDs
-  charts           Browse top charts
+  charts [type]    Top charts by type (demos/music/games/graphics/tools/onefiledemos)
   presets          Browse AQL presets
   cats             Browse categories
   ls/remote [path] Browse Ultimate files
@@ -3045,6 +3051,7 @@ EXAMPLES
   assembly64 search --handle laxity
   assembly64 sid sanxion
   assembly64 charts
+  assembly64 charts demos
   assembly64 ls
   assembly64 ls USB1/DEMOS
   assembly64 ls U64EII
