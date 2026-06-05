@@ -1396,19 +1396,13 @@ def cmd_charts(args):
             return
         show_chart(chart_type, fetch_chart(chart_type))
     else:
-        header("AVAILABLE CHARTS")
-        for i, name in enumerate(CHART_TYPES, 1):
-            print(f"  {i:>3}. {name}")
-        sep()
-        print()
-        choice = input("  Enter number to view chart (or Enter to quit): ").strip()
-        if not choice:
+        header("CHARTS")
+        rows = [f"  {i:>3}. {name}" for i, name in enumerate(CHART_TYPES, 1)]
+        idx = paginated_list(rows, "Enter number to view chart")
+        if idx is None:
             return
-        try:
-            chart_type = CHART_TYPES[int(choice) - 1]
-            show_chart(chart_type, fetch_chart(chart_type))
-        except (ValueError, IndexError):
-            print("  Invalid choice.")
+        chart_type = CHART_TYPES[idx]
+        show_chart(chart_type, fetch_chart(chart_type))
 
 
 def cmd_presets(args):
