@@ -1351,29 +1351,37 @@ def cmd_sid(args):
     pick(items, run_ip=run_ip, download=download, show_files=args.files, autodisk=getattr(args, "autodisk", False))
 
 
+CHART_TYPES = ["demos", "onefiledemos", "music", "graphics", "games", "tools"]
+
+
 def cmd_charts(args):
     run_ip   = getattr(args, "run", None)
     download = getattr(args, "download", False)
-    data     = get("charts")
-    if not isinstance(data, list) or not data:
-        print("  No charts available.")
-        return
 
-    chart_names = [c.get("name", "") for c in data if c.get("name")]
+    def fetch_chart(chart_type):
+        data = get(f"charts/{chart_type}")
+        # API returns a list of entries directly
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            return data.get("entries", [])
+        return []
 
-    def show_chart(chart):
-        items = chart.get("entries", [])
-        header(f"CHART: {chart.get('name','')}")
+    def show_chart(chart_type, items):
+        if not items:
+            print(f"  No entries for chart '{chart_type}'.")
+            return
+        header(f"CHART: {chart_type.upper()}")
         rows = []
         for i, item in enumerate(items, 1):
-            name    = item.get("name", "-")
-            group   = item.get("group") or ""
-            handle  = item.get("handle") or ""
-            year    = item.get("year") or ""
-            rating  = item.get("siteRating") or item.get("rating") or ""
-            credits = group or handle
+            name     = item.get("name", "-")
+            group    = item.get("group") or ""
+            handle   = item.get("handle") or ""
+            year     = item.get("year") or ""
+            rating   = item.get("siteRating") or item.get("rating") or ""
+            credits  = group or handle
             date_str = str(year) if year else ""
-            extra   = "  ".join(filter(None, [credits, date_str]))
+            extra    = "  ".join(filter(None, [credits, date_str]))
             rating_str = f"*{rating:.2f}" if isinstance(rating, float) else f"*{rating}"
             rows.append(f"  {i:>3}. {name}  [{extra}]  {rating_str}")
         idx = paginated_list(rows, "Enter number to view details")
@@ -1381,15 +1389,15 @@ def cmd_charts(args):
             show_item(items[idx], run_ip=run_ip, download=download)
 
     if args.name:
-        chart = next((c for c in data if c.get("name","").lower() == args.name.lower()), None)
-        if not chart:
+        chart_type = args.name.lower()
+        if chart_type not in CHART_TYPES:
             print(f"  Chart '{args.name}' not found.")
-            print(f"  Available: {', '.join(chart_names)}")
+            print(f"  Available: {', '.join(CHART_TYPES)}")
             return
-        show_chart(chart)
+        show_chart(chart_type, fetch_chart(chart_type))
     else:
         header("AVAILABLE CHARTS")
-        for i, name in enumerate(chart_names, 1):
+        for i, name in enumerate(CHART_TYPES, 1):
             print(f"  {i:>3}. {name}")
         sep()
         print()
@@ -1397,8 +1405,8 @@ def cmd_charts(args):
         if not choice:
             return
         try:
-            chart = data[int(choice) - 1]
-            show_chart(chart)
+            chart_type = CHART_TYPES[int(choice) - 1]
+            show_chart(chart_type, fetch_chart(chart_type))
         except (ValueError, IndexError):
             print("  Invalid choice.")
 
