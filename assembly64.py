@@ -2978,7 +2978,7 @@ hackerswithstyle.se/leet/
 COMMANDS
   search [query]   Search releases
   sid <query>      Search HVSC SIDs
-  charts           Browse top charts
+  charts [type]    Top charts by type (demos/music/games/graphics/tools/onefiledemos)
   presets          Browse AQL presets
   cats             Browse categories
   ls/remote [path] Browse Ultimate files
@@ -3051,6 +3051,7 @@ EXAMPLES
   assembly64 search --handle laxity
   assembly64 sid sanxion
   assembly64 charts
+  assembly64 charts demos
   assembly64 ls
   assembly64 ls USB1/DEMOS
   assembly64 ls U64EII
