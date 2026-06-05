@@ -43,7 +43,7 @@ github.com/GideonZ/1541u-documentation
 COMMANDS
   search [query]   Search releases
   sid <query>      Search HVSC SIDs
-  charts           Browse top charts
+  charts [type]    Top charts by type (demos/music/games/graphics/tools/onefiledemos)
   presets          Browse AQL presets
   cats             Browse categories
   ls/remote [path] Browse Ultimate files
@@ -110,6 +110,7 @@ EXAMPLES
   assembly64 search --handle laxity
   assembly64 sid sanxion
   assembly64 charts
+  assembly64 charts demos
   assembly64 ls
   assembly64 ls USB1/DEMOS
   assembly64 ls U64EII
@@ -233,17 +234,17 @@ $
   
 ```
 --------------------------------------------------------------
-  AVAILABLE CHARTS
+  CHARTS
 --------------------------------------------------------------
-    1. DEMOS
-    2. ONEFILE DEMOS
-    3. GAMES
-    4. MUSIC
-    5. GRAPHICS
-    6. TOOLS
---------------------------------------------------------------
+    1. demos
+    2. onefiledemos
+    3. music
+    4. graphics
+    5. games
+    6. tools
 
-  Enter number to view chart (or Enter to quit): 1
+  Showing 1-6 of 6  |
+  Number to select,  q=quit: 1
 --------------------------------------------------------------
   CHART: DEMOS
 --------------------------------------------------------------
@@ -268,9 +269,8 @@ $
    19. Lifecycle  []  *9.55
    20. Wonderland XIV  []  *9.55
 
-  Showing 1-20 of 200  |  n/->=next  p/<-=prev  q=quit
-
-  Enter number to view details: 5
+  Showing 1-20 of 200  |  n/->=next  p/<-=prev
+  Number to select,  b=back  q=quit: 5
 --------------------------------------------------------------
   1337
 --------------------------------------------------------------
