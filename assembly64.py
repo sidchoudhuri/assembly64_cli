@@ -159,9 +159,10 @@ if sys.stdout.isatty():
     _CYAN   = "\033[36m"
     _GREEN  = "\033[32m"
     _YELLOW = "\033[33m"
+    _DIM    = "\033[2m"
     _RESET  = "\033[0m"
 else:
-    _CYAN = _GREEN = _YELLOW = _RESET = ""
+    _CYAN = _GREEN = _YELLOW = _DIM = _RESET = ""
 
 
 class ColoredHelpFormatter(argparse.HelpFormatter):
@@ -183,16 +184,16 @@ class ColoredHelpFormatter(argparse.HelpFormatter):
         return result
 
 def sep():
-    print("-" * SEP_WIDTH)
+    print(f"{_DIM}{'-' * SEP_WIDTH}{_RESET}")
 
 def header(t):
     sep()
-    print(f"  {t}")
+    print(f"  {_YELLOW}{t}{_RESET}")
     sep()
 
 def field(label, value, width=16):
     if value not in (None, "", 0, 0.0):
-        print(f"  {label:<{width}} {value}")
+        print(f"  {_CYAN}{label:<{width}}{_RESET} {value}")
 
 def cat_label(cat_id):
     for name, cid in CAT_IDS.items():
@@ -290,7 +291,7 @@ def wait_for_load(ip, timeout=90, stable_count=4, poll_interval=0.5):
     waited   = 0
     loading  = False  # have we seen the value change yet?
 
-    print("  Waiting for load to complete ...", end="", flush=True)
+    print(f"  {_CYAN}Waiting for load to complete ...{_RESET}", end="", flush=True)
     while waited < timeout:
         try:
             url = f"http://{ip}/v1/machine:readmem?address=002D&length=2"
@@ -309,7 +310,7 @@ def wait_for_load(ip, timeout=90, stable_count=4, poll_interval=0.5):
                 if val == last_val:
                     stable += 1
                     if stable >= stable_count:
-                        print(f" done  ({val.hex()})")
+                        print(f" {_GREEN}done{_RESET}  {_DIM}({val.hex()}){_RESET}")
                         return True
                 else:
                     stable   = 1
@@ -330,7 +331,7 @@ def mount_and_run(ip, filename, data, drive="a"):
     ext    = "." + filename.lower().rsplit(".", 1)[-1]
     dtype  = DISK_TYPES.get(ext, "d64")
     params = {"type": dtype, "mode": "unlinked"}
-    print(f"  Uploading and mounting {filename} ...", end=" ", flush=True)
+    print(f"  {_CYAN}Uploading and mounting{_RESET} {filename} ...", end=" ", flush=True)
     try:
         qs  = "?" + urllib.parse.urlencode(params)
         url = f"http://{ip}/v1/drives/{drive}:mount{qs}"
@@ -346,21 +347,21 @@ def mount_and_run(ip, filename, data, drive="a"):
         print(f"FAILED: {e}")
         return 0
 
-    print(f"  Resetting machine ...", end=" ", flush=True)
+    print(f"  {_CYAN}Resetting machine ...{_RESET}", end=" ", flush=True)
     try:
         ultimate_put(ip, "machine:reset")
-        print("done")
+        print(f"{_GREEN}done{_RESET}")
     except Exception as e:
-        print(f"FAILED: {e}")
+        print(f"{_YELLOW}FAILED{_RESET}: {e}")
         return 0
 
     time.sleep(3)
-    print('  Injecting LOAD"*",8,1 + RUN ...')
+    print(f'  {_CYAN}Injecting{_RESET} LOAD"*",8,1 + RUN ...')
     inject_keyboard(ip, 'LOAD"*",8,1\rRUN\r')
     t = time.time()
     wait_for_load(ip)
     load_time = time.time() - t
-    print(f"  Load detection took {load_time:.1f}s")
+    print(f"  {_DIM}Load detection took {load_time:.1f}s{_RESET}")
     return load_time
 
 
@@ -369,13 +370,13 @@ def mount_disk(ip, filename, data, drive="a"):
     ext    = "." + filename.lower().rsplit(".", 1)[-1]
     dtype  = DISK_TYPES.get(ext, "d64")
     params = {"type": dtype, "mode": "unlinked"}
-    print(f"  Mounting {filename} on drive {drive.upper()}: ...", end=" ", flush=True)
+    print(f"  {_CYAN}Mounting{_RESET} {filename} on drive {drive.upper()}: ...", end=" ", flush=True)
     try:
         status = ultimate_post(ip, f"drives/{drive}:mount", data, params)
-        print(f"done  ({status})")
+        print(f"{_GREEN}done{_RESET}  {_DIM}({status}){_RESET}")
         return True
     except Exception as e:
-        print(f"FAILED: {e}")
+        print(f"{_YELLOW}FAILED{_RESET}: {e}")
         return False
 
 def is_idun():
@@ -741,19 +742,19 @@ def local_browse(remote_ip, remote_path, hostname):
 def download_file(item_id, cat, f, run_ip=None, target_dir="."):
     file_id  = f.get("id")
     filename = f.get("path", f"file_{file_id}").replace("\\", "/").split("/")[-1]
-    print(f"  Downloading {filename} ...", end=" ", flush=True)
+    print(f"  {_CYAN}Downloading{_RESET} {filename} ...", end=" ", flush=True)
     try:
         data = fetch_file_data(item_id, cat, f)
-        print(f"done  ({len(data):,} bytes)")
+        print(f"{_GREEN}done{_RESET}  {_DIM}({len(data):,} bytes){_RESET}")
         if run_ip:
             run_on_ultimate(filename, data, run_ip)
         else:
             filepath = os.path.join(target_dir, filename)
             with open(filepath, "wb") as out:
                 out.write(data)
-            print(f"  Saved  ->  {filepath}")
+            print(f"  {_GREEN}Saved{_RESET}  ->  {filepath}")
     except Exception as e:
-        print(f"FAILED: {e}")
+        print(f"{_YELLOW}FAILED{_RESET}: {e}")
 
 # ---------- Flip info ---------------------------------------------------------
 
@@ -791,14 +792,14 @@ def action_prompt(run_ip, flipinfo=None, can_back=False):
 
     print()
     for i, (_, label) in enumerate(options, 1):
-        print(f"  [{i}] {label}")
+        print(f"  {_CYAN}[{i}]{_RESET} {label}")
     extras = ["v=favorite"]
     if can_back:
         extras.append("b=back")
     extras.append("q=quit")
-    print(f"  {'  '.join(extras)}")
+    print(f"  {_DIM}{'  '.join(extras)}{_RESET}")
     print()
-    choice = input("  Choose action: ").strip().lower()
+    choice = input(f"  {_GREEN}Choose action{_RESET}: ").strip().lower()
     if not choice or choice == "q":
         return None
     if choice == "b" and can_back:
@@ -977,17 +978,17 @@ def handle_files(iid, cat, entries, run_ip, download, flipinfo=None, item_name=N
         for i, f in enumerate(disks, 1):
             print(f"    {i}. {f.get('path','')}  ({f.get('size',0):,} bytes)")
         print()
-        print("  Downloading all disks...", flush=True)
+        print(f"  {_CYAN}Downloading all disks...{_RESET}", flush=True)
         disk_cache = []
         for f in disks:
             fn = f.get("path","").replace("\\","/").split("/")[-1]
-            print(f"  Fetching {fn} ...", end=" ", flush=True)
+            print(f"  {_CYAN}Fetching{_RESET} {fn} ...", end=" ", flush=True)
             try:
                 data = fetch_file_data(iid, cat, f)
                 disk_cache.append((fn, data))
-                print(f"done  ({len(data):,} bytes)")
+                print(f"{_GREEN}done{_RESET}  {_DIM}({len(data):,} bytes){_RESET}")
             except Exception as e:
-                print(f"FAILED: {e}")
+                print(f"{_YELLOW}FAILED{_RESET}: {e}")
                 disk_cache.append((fn, None))
 
         if disk_cache and disk_cache[0][1]:
@@ -1090,12 +1091,12 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
                  if "." + f.get("path","").lower().rsplit(".",1)[-1] in disk_exts]
     flipinfo  = get_flipinfo(iid, cat) if len(disks) > 1 else []
     if flipinfo:
-        print(f"\n  Flip info available -- {len(flipinfo)} disks with auto-flip timings.")
+        print(f"\n  {_GREEN}Flip info available{_RESET} -- {len(flipinfo)} disks with auto-flip timings.")
 
     if show_files and not download and not run_ip:
-        print("\n  Files:")
+        print(f"\n  {_YELLOW}Files:{_RESET}")
         for i, f in enumerate(entries, 1):
-            print(f"    [{i}] {f.get('path','')}  ({f.get('size',0):,} bytes)")
+            print(f"    [{i}] {_CYAN}{f.get('path','')}{_RESET}  {_DIM}({f.get('size',0):,} bytes){_RESET}")
         return
 
     if download:
@@ -1111,9 +1112,9 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
         return
 
     # Interactive action prompt
-    print("\n  Files:")
+    print(f"\n  {_YELLOW}Files:{_RESET}")
     for i, f in enumerate(entries, 1):
-        print(f"    {i:>3}. {f.get('path','')}  ({f.get('size',0):,} bytes)")
+        print(f"    {i:>3}. {_CYAN}{f.get('path','')}{_RESET}  {_DIM}({f.get('size',0):,} bytes){_RESET}")
 
     while True:
         action = action_prompt(run_ip=None, flipinfo=flipinfo, can_back=can_back)
@@ -1228,7 +1229,7 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=F
         if end < total:
             nav.append("n/->=next")
         nav_str = ("  " + "  ".join(nav)) if nav else ""
-        print(f"  Showing {offset+1}-{end} of {total}  |{nav_str}")
+        print(f"  {_DIM}Showing {offset+1}-{end} of {total}  |{nav_str}{_RESET}")
 
         # Line 2: Number to select, actions q=quit:
         actions = []
@@ -1242,7 +1243,7 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=F
             actions.append("b=back")
         actions.append("q=quit")
         actions_str = "  ".join(actions)
-        choice = read_input(f"  Number to select,  {actions_str}: ").lower()
+        choice = read_input(f"  {_GREEN}Number to select{_RESET},  {actions_str}: ").lower()
 
         if not choice or choice == "q":
             return None
@@ -1275,7 +1276,7 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=F
             print("  Invalid")
 
 def pick(items, run_ip=None, download=False, show_files=False, autodisk=False, can_back=False):
-    print(f"\n  {len(items)} result(s):\n")
+    print(f"\n  {_GREEN}{len(items)} result(s){_RESET}:\n")
     rows = []
     for i, item in enumerate(items, 1):
         name     = item.get("name", "-")
@@ -1287,7 +1288,7 @@ def pick(items, run_ip=None, download=False, show_files=False, autodisk=False, c
         credits  = group or handle
         date_str = released or (str(year) if year else "")
         extra    = "  ".join(filter(None, [credits, date_str, cat]))
-        rows.append(f"  {i:>3}. {name}  [{extra}]")
+        rows.append(f"  {i:>3}. {_CYAN}{name}{_RESET}  {_DIM}[{extra}]{_RESET}")
     idx = paginated_list(rows, "Enter number to view details", can_back=can_back)
     if idx is None or idx in ("up", "mkdir", "rename", "delete", "upload"):
         return False
@@ -1298,7 +1299,7 @@ def pick(items, run_ip=None, download=False, show_files=False, autodisk=False, c
 
 
 def pick_name(names, prompt="select", can_back=False):
-    print(f"\n  {len(names)} match(es):\n")
+    print(f"\n  {_GREEN}{len(names)} match(es){_RESET}:\n")
     rows = [f"  {i:>3}. {n}" for i, n in enumerate(names, 1)]
     idx  = paginated_list(rows, f"Enter number to {prompt}", can_back=can_back)
     if idx is None or idx in ("up", "mkdir", "rename", "delete", "upload"):
@@ -2011,15 +2012,15 @@ def cmd_rrun(args):
         except Exception as e:
             print(f"FAILED: {e}")
             return
-        print(f"  Resetting machine ...", end=" ", flush=True)
+        print(f"  {_CYAN}Resetting machine ...{_RESET}", end=" ", flush=True)
         try:
             ultimate_put(ip, "machine:reset")
-            print("done")
+            print(f"{_GREEN}done{_RESET}")
         except Exception as e:
-            print(f"FAILED: {e}")
+            print(f"{_YELLOW}FAILED{_RESET}: {e}")
             return
         time.sleep(3)
-        print('  Injecting LOAD"*",8,1 + RUN ...')
+        print(f'  {_CYAN}Injecting{_RESET} LOAD"*",8,1 + RUN ...')
         inject_keyboard(ip, 'LOAD"*",8,1\rRUN\r')
     else:
         print(f"  Unsupported file type: {ext}")
