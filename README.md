@@ -13,6 +13,7 @@ A command-line C64 scene lookup tool for the 1541 Ultimate II/II+L, Ultimate64/U
 - Multi-disk auto-flip
 - SID player integration
 - Charts, presets, categories
+- Favorites system — save items from any search result and browse by category
 - Config system with dirs and devices
 
 Please send any feature requests or report any issues [here](https://github.com/sidchoudhuri/assembly64_cli/issues)
@@ -34,7 +35,7 @@ cp assembly64.py ~/.local/bin/assembly64.py
 
 ## Usage
 ```
-$ ./assembly64.py --fullhelp
+$ ./assembly64.py --help
 
 ASSEMBLY64 CLI - C64 Scene Lookup Tool
 APIS: hackerswithstyle.se/leet/
@@ -60,7 +61,8 @@ COMMANDS
   reboot           Reboot the C64
   device/devices   List devices
   config           Show/set config
-  help             Show this help
+  favorites/fav    Browse saved favorites
+  help / --help / -h  Show this help
 
 SEARCH FLAGS
   --group  --handle  --repo  --cat
@@ -103,6 +105,14 @@ CONFIG FLAGS
   --set NAME       Set active device
   --next           Cycle to next device
 
+FAVORITES FLAGS
+  --list           Flat list of all favorites
+  --remove ID      Remove favorite by item ID
+  --demos          Show demos favorites only
+  --music          Show music favorites only
+  --games          Show games favorites only
+  (etc. for any category name)
+
 
 EXAMPLES
   assembly64 search "edge of disgrace"
@@ -130,6 +140,11 @@ EXAMPLES
   assembly64 config --set U2L
   assembly64 config --next
   assembly64 config --remove U2L
+  assembly64 favorites
+  assembly64 favorites --list
+  assembly64 favorites --music
+  assembly64 favorites --demos
+  assembly64 favorites --remove 12345
 $
   ```
 ## Examples
@@ -511,6 +526,51 @@ $
 $
 ```
 </details>
+
+### Saving a favorite and browsing the favorites list
+
+When viewing any search result, the action prompt includes `[v] Add to favorites` (or press `v`). Favorites are stored in `~/.assembly64/config.json`.
+
+```
+  [1] Run on Ultimate (192.168.2.64)
+  [2] Run with auto disk flip (192.168.2.64)
+  [3] Download
+  [4] Add to favorites
+  v=favorite  q=quit
+
+  Choose action: v
+  Added to favorites: Edge of Disgrace
+```
+
+Browse by category:
+```
+$ assembly64 favorites
+--------------------------------------------------------------
+  FAVORITES  (5 saved)
+--------------------------------------------------------------
+    1. demos          (3)
+    2. music          (1)
+    3. graphics       (1)
+
+  Number to drill down,  l=list all  q=quit: 1
+--------------------------------------------------------------
+  FAVORITES › demos  (3)
+--------------------------------------------------------------
+    1. Edge of Disgrace  [Booze Design  2008]
+    2. Comaland 100%  [Censor Design  2015]
+    3. Qdor Qdor  [Fairlight  2026]
+
+  Number to select,  b=back  q=quit: 1
+  [o]pen  [d]elete  [Enter=cancel]: o
+```
+
+Or use flags to go straight to a category or flat list:
+```
+$ assembly64 favorites --demos
+$ assembly64 favorites --music
+$ assembly64 favorites --list
+$ assembly64 favorites --remove 12345
+```
 
 ### Interactively building a search query in the Category Browser
 

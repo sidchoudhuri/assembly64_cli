@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-VERSION = "1.0.4"
-BUILD   = "2026-06-05-1"
+VERSION = "1.0.5"
+BUILD   = "2026-06-06-1"
 
 import sys
 import os
@@ -8,6 +8,7 @@ import json
 import argparse
 import urllib.request
 import urllib.parse
+import datetime
 
 # https://github.com/sidchoudhuri/assembly64_cli
 BASE         = "https://hackerswithstyle.se/leet/"
@@ -73,6 +74,49 @@ def save_config(cfg):
     with open(CONFIG_FILE, "w") as f:
         json.dump(cfg, f, indent=2)
 
+# ---------- Favorites ---------------------------------------------------------
+
+def favorites_list():
+    return load_config().get("favorites", [])
+
+def favorites_add(item):
+    cfg  = load_config()
+    favs = cfg.get("favorites", [])
+    iid  = str(item.get("id", ""))
+    cat  = item.get("category", "")
+    if any(str(f.get("id")) == iid and f.get("cat") == cat for f in favs):
+        print("  Already in favorites.")
+        return
+    cat_name = ""
+    for name, cid in CAT_IDS.items():
+        if cid == cat:
+            cat_name = name
+            break
+    favs.append({
+        "id":      iid,
+        "cat":     cat,
+        "cat_name": cat_name,
+        "title":   item.get("name", ""),
+        "group":   item.get("group") or item.get("handle") or "",
+        "year":    str(item.get("year") or ""),
+        "added":   datetime.date.today().isoformat(),
+    })
+    cfg["favorites"] = favs
+    save_config(cfg)
+    print(f"  Added to favorites: {item.get('name', '')}")
+
+def favorites_remove(iid, cat):
+    cfg  = load_config()
+    favs = cfg.get("favorites", [])
+    before = len(favs)
+    favs = [f for f in favs if not (str(f.get("id")) == str(iid) and f.get("cat") == cat)]
+    if len(favs) == before:
+        print("  Not found in favorites.")
+        return
+    cfg["favorites"] = favs
+    save_config(cfg)
+    print("  Removed from favorites.")
+
 # ---------- HTTP --------------------------------------------------------------
 
 def get(path):
@@ -115,9 +159,10 @@ if sys.stdout.isatty():
     _CYAN   = "\033[36m"
     _GREEN  = "\033[32m"
     _YELLOW = "\033[33m"
+    _DIM    = "\033[2m"
     _RESET  = "\033[0m"
 else:
-    _CYAN = _GREEN = _YELLOW = _RESET = ""
+    _CYAN = _GREEN = _YELLOW = _DIM = _RESET = ""
 
 
 class ColoredHelpFormatter(argparse.HelpFormatter):
@@ -139,16 +184,16 @@ class ColoredHelpFormatter(argparse.HelpFormatter):
         return result
 
 def sep():
-    print("-" * SEP_WIDTH)
+    print(f"{_DIM}{'-' * SEP_WIDTH}{_RESET}")
 
 def header(t):
     sep()
-    print(f"  {t}")
+    print(f"  {_YELLOW}{t}{_RESET}")
     sep()
 
 def field(label, value, width=16):
     if value not in (None, "", 0, 0.0):
-        print(f"  {label:<{width}} {value}")
+        print(f"  {_CYAN}{label:<{width}}{_RESET} {value}")
 
 def cat_label(cat_id):
     for name, cid in CAT_IDS.items():
@@ -246,7 +291,7 @@ def wait_for_load(ip, timeout=90, stable_count=4, poll_interval=0.5):
     waited   = 0
     loading  = False  # have we seen the value change yet?
 
-    print("  Waiting for load to complete ...", end="", flush=True)
+    print(f"  {_CYAN}Waiting for load to complete ...{_RESET}", end="", flush=True)
     while waited < timeout:
         try:
             url = f"http://{ip}/v1/machine:readmem?address=002D&length=2"
@@ -265,7 +310,7 @@ def wait_for_load(ip, timeout=90, stable_count=4, poll_interval=0.5):
                 if val == last_val:
                     stable += 1
                     if stable >= stable_count:
-                        print(f" done  ({val.hex()})")
+                        print(f" {_GREEN}done{_RESET}  {_DIM}({val.hex()}){_RESET}")
                         return True
                 else:
                     stable   = 1
@@ -286,7 +331,7 @@ def mount_and_run(ip, filename, data, drive="a"):
     ext    = "." + filename.lower().rsplit(".", 1)[-1]
     dtype  = DISK_TYPES.get(ext, "d64")
     params = {"type": dtype, "mode": "unlinked"}
-    print(f"  Uploading and mounting {filename} ...", end=" ", flush=True)
+    print(f"  {_CYAN}Uploading and mounting{_RESET} {filename} ...", end=" ", flush=True)
     try:
         qs  = "?" + urllib.parse.urlencode(params)
         url = f"http://{ip}/v1/drives/{drive}:mount{qs}"
@@ -302,21 +347,21 @@ def mount_and_run(ip, filename, data, drive="a"):
         print(f"FAILED: {e}")
         return 0
 
-    print(f"  Resetting machine ...", end=" ", flush=True)
+    print(f"  {_CYAN}Resetting machine ...{_RESET}", end=" ", flush=True)
     try:
         ultimate_put(ip, "machine:reset")
-        print("done")
+        print(f"{_GREEN}done{_RESET}")
     except Exception as e:
-        print(f"FAILED: {e}")
+        print(f"{_YELLOW}FAILED{_RESET}: {e}")
         return 0
 
     time.sleep(3)
-    print('  Injecting LOAD"*",8,1 + RUN ...')
+    print(f'  {_CYAN}Injecting{_RESET} LOAD"*",8,1 + RUN ...')
     inject_keyboard(ip, 'LOAD"*",8,1\rRUN\r')
     t = time.time()
     wait_for_load(ip)
     load_time = time.time() - t
-    print(f"  Load detection took {load_time:.1f}s")
+    print(f"  {_DIM}Load detection took {load_time:.1f}s{_RESET}")
     return load_time
 
 
@@ -325,13 +370,13 @@ def mount_disk(ip, filename, data, drive="a"):
     ext    = "." + filename.lower().rsplit(".", 1)[-1]
     dtype  = DISK_TYPES.get(ext, "d64")
     params = {"type": dtype, "mode": "unlinked"}
-    print(f"  Mounting {filename} on drive {drive.upper()}: ...", end=" ", flush=True)
+    print(f"  {_CYAN}Mounting{_RESET} {filename} on drive {drive.upper()}: ...", end=" ", flush=True)
     try:
         status = ultimate_post(ip, f"drives/{drive}:mount", data, params)
-        print(f"done  ({status})")
+        print(f"{_GREEN}done{_RESET}  {_DIM}({status}){_RESET}")
         return True
     except Exception as e:
-        print(f"FAILED: {e}")
+        print(f"{_YELLOW}FAILED{_RESET}: {e}")
         return False
 
 def is_idun():
@@ -697,19 +742,19 @@ def local_browse(remote_ip, remote_path, hostname):
 def download_file(item_id, cat, f, run_ip=None, target_dir="."):
     file_id  = f.get("id")
     filename = f.get("path", f"file_{file_id}").replace("\\", "/").split("/")[-1]
-    print(f"  Downloading {filename} ...", end=" ", flush=True)
+    print(f"  {_CYAN}Downloading{_RESET} {filename} ...", end=" ", flush=True)
     try:
         data = fetch_file_data(item_id, cat, f)
-        print(f"done  ({len(data):,} bytes)")
+        print(f"{_GREEN}done{_RESET}  {_DIM}({len(data):,} bytes){_RESET}")
         if run_ip:
             run_on_ultimate(filename, data, run_ip)
         else:
             filepath = os.path.join(target_dir, filename)
             with open(filepath, "wb") as out:
                 out.write(data)
-            print(f"  Saved  ->  {filepath}")
+            print(f"  {_GREEN}Saved{_RESET}  ->  {filepath}")
     except Exception as e:
-        print(f"FAILED: {e}")
+        print(f"{_YELLOW}FAILED{_RESET}: {e}")
 
 # ---------- Flip info ---------------------------------------------------------
 
@@ -741,24 +786,32 @@ def action_prompt(run_ip, flipinfo=None, can_back=False):
         if has_flip:
             options.append(("autodisk", "Run with auto disk flip (you'll be asked for IP)"))
     options.append(("download", "Download"))
+    options.append(("favorite", "Add to favorites"))
     if can_back:
         options.append(("refine",   "Refine query"))
 
     print()
     for i, (_, label) in enumerate(options, 1):
-        print(f"  [{i}] {label}")
+        print(f"  {_CYAN}[{i}]{_RESET} {label}")
+    extras = ["v=favorite"]
     if can_back:
-        print(f"  b=back  q=quit")
+        extras.append("b=back")
+    extras.append("q=quit")
+    print(f"  {_DIM}{'  '.join(extras)}{_RESET}")
     print()
-    choice = input("  Choose action (or Enter to quit): ").strip().lower()
+    choice = input(f"  {_GREEN}Choose action{_RESET}: ").strip().lower()
     if not choice or choice == "q":
         return None
     if choice == "b" and can_back:
         return "back"
+    if choice == "v":
+        return "favorite"
     try:
         key, _ = options[int(choice) - 1]
         if key == "refine":
             return "refine"
+        if key == "favorite":
+            return "favorite"
         if key == "download":
             return ("download",)
         if key in ("run", "autodisk"):
@@ -925,17 +978,17 @@ def handle_files(iid, cat, entries, run_ip, download, flipinfo=None, item_name=N
         for i, f in enumerate(disks, 1):
             print(f"    {i}. {f.get('path','')}  ({f.get('size',0):,} bytes)")
         print()
-        print("  Downloading all disks...", flush=True)
+        print(f"  {_CYAN}Downloading all disks...{_RESET}", flush=True)
         disk_cache = []
         for f in disks:
             fn = f.get("path","").replace("\\","/").split("/")[-1]
-            print(f"  Fetching {fn} ...", end=" ", flush=True)
+            print(f"  {_CYAN}Fetching{_RESET} {fn} ...", end=" ", flush=True)
             try:
                 data = fetch_file_data(iid, cat, f)
                 disk_cache.append((fn, data))
-                print(f"done  ({len(data):,} bytes)")
+                print(f"{_GREEN}done{_RESET}  {_DIM}({len(data):,} bytes){_RESET}")
             except Exception as e:
-                print(f"FAILED: {e}")
+                print(f"{_YELLOW}FAILED{_RESET}: {e}")
                 disk_cache.append((fn, None))
 
         if disk_cache and disk_cache[0][1]:
@@ -1038,12 +1091,12 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
                  if "." + f.get("path","").lower().rsplit(".",1)[-1] in disk_exts]
     flipinfo  = get_flipinfo(iid, cat) if len(disks) > 1 else []
     if flipinfo:
-        print(f"\n  Flip info available -- {len(flipinfo)} disks with auto-flip timings.")
+        print(f"\n  {_GREEN}Flip info available{_RESET} -- {len(flipinfo)} disks with auto-flip timings.")
 
     if show_files and not download and not run_ip:
-        print("\n  Files:")
+        print(f"\n  {_YELLOW}Files:{_RESET}")
         for i, f in enumerate(entries, 1):
-            print(f"    [{i}] {f.get('path','')}  ({f.get('size',0):,} bytes)")
+            print(f"    [{i}] {_CYAN}{f.get('path','')}{_RESET}  {_DIM}({f.get('size',0):,} bytes){_RESET}")
         return
 
     if download:
@@ -1059,37 +1112,42 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
         return
 
     # Interactive action prompt
-    print("\n  Files:")
+    print(f"\n  {_YELLOW}Files:{_RESET}")
     for i, f in enumerate(entries, 1):
-        print(f"    {i:>3}. {f.get('path','')}  ({f.get('size',0):,} bytes)")
+        print(f"    {i:>3}. {_CYAN}{f.get('path','')}{_RESET}  {_DIM}({f.get('size',0):,} bytes){_RESET}")
 
-    action = action_prompt(run_ip=None, flipinfo=flipinfo, can_back=can_back)
-    if action is None:
+    while True:
+        action = action_prompt(run_ip=None, flipinfo=flipinfo, can_back=can_back)
+        if action is None:
+            return
+        if action in ("back", "refine"):
+            return action
+        if action == "favorite":
+            favorites_add(item)
+            continue
+        if action[0] in ("run", "autodisk"):
+            ip = action[1]
+            fi = flipinfo if action[0] == "autodisk" else None
+            handle_files(iid, cat, entries, run_ip=ip, download=False, flipinfo=fi,
+                         item_name=name, item_id=iid)
+        elif action[0] == "download":
+            target_dir = prompt_download_dir(name, iid, category=cat, multi_file=len(entries) > 1) if len(entries) > 1 else "."
+            if len(entries) == 1:
+                download_file(iid, cat, entries[0], target_dir=target_dir)
+            else:
+                choice = input("\n  Enter number to download (or Enter for all): ").strip()
+                if choice:
+                    try:
+                        entries = [entries[int(choice) - 1]]
+                    except (ValueError, IndexError):
+                        print("  Invalid -- downloading all.")
+                for f in entries:
+                    download_file(iid, cat, f, target_dir=target_dir)
+                if flipinfo and len(disks) > 1 and not choice:
+                    disk_filenames = [f.get("path","").replace("\\","/").split("/")[-1]
+                                      for f in disks]
+                    write_flip_file(flipinfo, disk_filenames, target_dir=target_dir, item_id=iid)
         return
-    if action in ("back", "refine"):
-        return action
-    if action[0] in ("run", "autodisk"):
-        ip = action[1]
-        fi = flipinfo if action[0] == "autodisk" else None
-        handle_files(iid, cat, entries, run_ip=ip, download=False, flipinfo=fi,
-                     item_name=name, item_id=iid)
-    elif action[0] == "download":
-        target_dir = prompt_download_dir(name, iid, category=cat, multi_file=len(entries) > 1) if len(entries) > 1 else "."
-        if len(entries) == 1:
-            download_file(iid, cat, entries[0], target_dir=target_dir)
-        else:
-            choice = input("\n  Enter number to download (or Enter for all): ").strip()
-            if choice:
-                try:
-                    entries = [entries[int(choice) - 1]]
-                except (ValueError, IndexError):
-                    print("  Invalid -- downloading all.")
-            for f in entries:
-                download_file(iid, cat, f, target_dir=target_dir)
-            if flipinfo and len(disks) > 1 and not choice:
-                disk_filenames = [f.get("path","").replace("\\","/").split("/")[-1]
-                                  for f in disks]
-                write_flip_file(flipinfo, disk_filenames, target_dir=target_dir, item_id=iid)
 
 # ---------- List helpers ------------------------------------------------------
 
@@ -1171,7 +1229,7 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=F
         if end < total:
             nav.append("n/->=next")
         nav_str = ("  " + "  ".join(nav)) if nav else ""
-        print(f"  Showing {offset+1}-{end} of {total}  |{nav_str}")
+        print(f"  {_DIM}Showing {offset+1}-{end} of {total}  |{nav_str}{_RESET}")
 
         # Line 2: Number to select, actions q=quit:
         actions = []
@@ -1185,7 +1243,7 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=F
             actions.append("b=back")
         actions.append("q=quit")
         actions_str = "  ".join(actions)
-        choice = read_input(f"  Number to select,  {actions_str}: ").lower()
+        choice = read_input(f"  {_GREEN}Number to select{_RESET},  {actions_str}: ").lower()
 
         if not choice or choice == "q":
             return None
@@ -1218,7 +1276,7 @@ def paginated_list(rows, prompt, can_mkdir=False, can_modify=False, can_upload=F
             print("  Invalid")
 
 def pick(items, run_ip=None, download=False, show_files=False, autodisk=False, can_back=False):
-    print(f"\n  {len(items)} result(s):\n")
+    print(f"\n  {_GREEN}{len(items)} result(s){_RESET}:\n")
     rows = []
     for i, item in enumerate(items, 1):
         name     = item.get("name", "-")
@@ -1230,7 +1288,7 @@ def pick(items, run_ip=None, download=False, show_files=False, autodisk=False, c
         credits  = group or handle
         date_str = released or (str(year) if year else "")
         extra    = "  ".join(filter(None, [credits, date_str, cat]))
-        rows.append(f"  {i:>3}. {name}  [{extra}]")
+        rows.append(f"  {i:>3}. {_CYAN}{name}{_RESET}  {_DIM}[{extra}]{_RESET}")
     idx = paginated_list(rows, "Enter number to view details", can_back=can_back)
     if idx is None or idx in ("up", "mkdir", "rename", "delete", "upload"):
         return False
@@ -1241,7 +1299,7 @@ def pick(items, run_ip=None, download=False, show_files=False, autodisk=False, c
 
 
 def pick_name(names, prompt="select", can_back=False):
-    print(f"\n  {len(names)} match(es):\n")
+    print(f"\n  {_GREEN}{len(names)} match(es){_RESET}:\n")
     rows = [f"  {i:>3}. {n}" for i, n in enumerate(names, 1)]
     idx  = paginated_list(rows, f"Enter number to {prompt}", can_back=can_back)
     if idx is None or idx in ("up", "mkdir", "rename", "delete", "upload"):
@@ -1954,15 +2012,15 @@ def cmd_rrun(args):
         except Exception as e:
             print(f"FAILED: {e}")
             return
-        print(f"  Resetting machine ...", end=" ", flush=True)
+        print(f"  {_CYAN}Resetting machine ...{_RESET}", end=" ", flush=True)
         try:
             ultimate_put(ip, "machine:reset")
-            print("done")
+            print(f"{_GREEN}done{_RESET}")
         except Exception as e:
-            print(f"FAILED: {e}")
+            print(f"{_YELLOW}FAILED{_RESET}: {e}")
             return
         time.sleep(3)
-        print('  Injecting LOAD"*",8,1 + RUN ...')
+        print(f'  {_CYAN}Injecting{_RESET} LOAD"*",8,1 + RUN ...')
         inject_keyboard(ip, 'LOAD"*",8,1\rRUN\r')
     else:
         print(f"  Unsupported file type: {ext}")
@@ -2953,6 +3011,181 @@ def cmd_config(args):
         print("  (no config saved)")
     sep()
 
+# ---------- Favorites command -------------------------------------------------
+
+# Canonical category order for display
+_FAV_CAT_ORDER = ["demos", "games", "music", "graphics", "intros", "discmags",
+                  "tools", "sid", "misc", "c128", "bbs", "charts"]
+
+def _fav_cat_name(fav):
+    """Return display name for a favorite's category."""
+    name = fav.get("cat_name", "")
+    if name:
+        return name
+    cat_id = fav.get("cat")
+    if cat_id is not None:
+        for n, cid in CAT_IDS.items():
+            if cid == cat_id:
+                return n
+    return "other"
+
+def _fav_row(fav, show_cat=False):
+    title  = fav.get("title", "-")
+    group  = fav.get("group", "")
+    year   = fav.get("year", "")
+    extra  = "  ".join(filter(None, [group, year] + ([_fav_cat_name(fav)] if show_cat else [])))
+    return f"  {title}  [{extra}]" if extra else f"  {title}"
+
+def _open_favorite(fav):
+    """Reconstruct a minimal item dict and open show_item."""
+    item = {
+        "id":       fav.get("id"),
+        "category": fav.get("cat"),
+        "name":     fav.get("title", ""),
+        "group":    fav.get("group", ""),
+        "year":     fav.get("year", ""),
+    }
+    show_item(item, can_back=True)
+
+def cmd_favorites(args):
+    favs = favorites_list()
+
+    # --remove ID
+    if getattr(args, "remove_id", None):
+        # find by id substring match
+        rid = args.remove_id.strip()
+        matches = [f for f in favs if str(f.get("id")) == rid]
+        if not matches:
+            print(f"  No favorite with id '{rid}'.")
+            return
+        for f in matches:
+            favorites_remove(f["id"], f["cat"])
+        return
+
+    if not favs:
+        print("  No favorites saved yet.")
+        print("  Add items from the action prompt when viewing search results.")
+        return
+
+    # Determine filter category from --demos, --music etc.
+    filter_cat = None
+    for cat_name in _FAV_CAT_ORDER:
+        if getattr(args, cat_name, False):
+            filter_cat = cat_name
+            break
+
+    # --list or category filter: flat list
+    if getattr(args, "list_all", False) or filter_cat:
+        subset = favs
+        if filter_cat:
+            subset = [f for f in favs if _fav_cat_name(f) == filter_cat]
+        if not subset:
+            print(f"  No favorites in category '{filter_cat}'.")
+            return
+        title = f"FAVORITES › {filter_cat}" if filter_cat else "FAVORITES"
+        header(f"{title}  ({len(subset)})")
+        rows = [f"  {i:>3}. {_fav_row(f, show_cat=not bool(filter_cat))}"
+                for i, f in enumerate(subset, 1)]
+        while True:
+            idx = paginated_list(rows, "Enter number to open", can_modify=False, can_back=False)
+            if idx is None:
+                return
+            fav = subset[idx]
+            confirm = input(f"  [o]pen  [d]elete  [Enter=cancel]: ").strip().lower()
+            if confirm == "o":
+                _open_favorite(fav)
+            elif confirm == "d":
+                favorites_remove(fav["id"], fav["cat"])
+                subset.pop(idx)
+                rows.pop(idx)
+                for j in range(idx, len(rows)):
+                    rows[j] = f"  {j+1:>3}. " + rows[j].split(". ", 1)[1]
+                if not subset:
+                    print("  No more favorites in this list.")
+                    return
+
+    else:
+        # Category view
+        counts = {}
+        for f in favs:
+            cn = _fav_cat_name(f)
+            counts[cn] = counts.get(cn, 0) + 1
+
+        ordered = [c for c in _FAV_CAT_ORDER if c in counts]
+        ordered += sorted(c for c in counts if c not in _FAV_CAT_ORDER)
+
+        while True:
+            header(f"FAVORITES  ({len(favs)} saved)")
+            cat_rows = [f"  {i:>3}. {c:<16} ({counts[c]})"
+                        for i, c in enumerate(ordered, 1)]
+            for row in cat_rows:
+                print(row)
+            print()
+            choice = input("  Number to drill down,  l=list all  q=quit: ").strip().lower()
+            if not choice or choice == "q":
+                return
+            if choice == "l":
+                # flat list
+                rows = [f"  {i:>3}. {_fav_row(f, show_cat=True)}"
+                        for i, f in enumerate(favs, 1)]
+                subset = list(favs)
+                while True:
+                    idx = paginated_list(rows, "Enter number to open", can_back=True)
+                    if idx is None or idx == "back":
+                        break
+                    fav = subset[idx]
+                    confirm = input(f"  [o]pen  [d]elete  [Enter=cancel]: ").strip().lower()
+                    if confirm == "o":
+                        _open_favorite(fav)
+                    elif confirm == "d":
+                        favorites_remove(fav["id"], fav["cat"])
+                        cat_name = _fav_cat_name(fav)
+                        counts[cat_name] = counts.get(cat_name, 1) - 1
+                        if counts[cat_name] == 0:
+                            del counts[cat_name]
+                            if cat_name in ordered:
+                                ordered.remove(cat_name)
+                        subset.pop(idx)
+                        rows.pop(idx)
+                        for j in range(idx, len(rows)):
+                            rows[j] = f"  {j+1:>3}. " + rows[j].split(". ", 1)[1]
+                        if not subset:
+                            return
+                continue
+            try:
+                cat_name = ordered[int(choice) - 1]
+            except (ValueError, IndexError):
+                print("  Invalid.")
+                continue
+
+            subset = [f for f in favs if _fav_cat_name(f) == cat_name]
+            rows   = [f"  {i:>3}. {_fav_row(f)}" for i, f in enumerate(subset, 1)]
+            while True:
+                header(f"FAVORITES › {cat_name}  ({len(subset)})")
+                idx = paginated_list(rows, "Enter number to open", can_back=True)
+                if idx is None or idx == "back":
+                    break
+                fav = subset[idx]
+                confirm = input(f"  [o]pen  [d]elete  [Enter=cancel]: ").strip().lower()
+                if confirm == "o":
+                    _open_favorite(fav)
+                elif confirm == "d":
+                    favorites_remove(fav["id"], fav["cat"])
+                    counts[cat_name] -= 1
+                    subset.pop(idx)
+                    rows.pop(idx)
+                    for j in range(idx, len(rows)):
+                        rows[j] = f"  {j+1:>3}. " + rows[j].split(". ", 1)[1]
+                    if not subset:
+                        if counts[cat_name] == 0:
+                            del counts[cat_name]
+                            ordered.remove(cat_name)
+                        break
+            favs = favorites_list()
+            if not favs:
+                print("  No favorites remaining.")
+                return
+
 # ---------- Parser ------------------------------------------------------------
 
 def add_common(sp):
@@ -2971,7 +3204,29 @@ def add_common(sp):
     sp.add_argument("--autodisk", action="store_true", help="Auto-flip disks using Assembly64 flip timings (--run required)")
 
 
-FULL_HELP = """
+def cmd_help(args=None):
+    import re
+
+    def _color_line(line):
+        # Section headers: ALL CAPS line with no leading spaces
+        if re.match(r'^[A-Z][A-Z/ -]{2,}$', line.rstrip()):
+            return f"{_YELLOW}{line}{_RESET}"
+        # Command lines: leading spaces then word(s) before whitespace gap to description
+        #   e.g. "  search [query]   Search releases"
+        #   color the command name(s) before the first big gap
+        m = re.match(r'^(  )([a-z][a-z0-9/._-]*)(\s)', line)
+        if m:
+            return f"{m.group(1)}{_CYAN}{m.group(2)}{_RESET}{line[m.end(2):]}"
+        # Flag lines: leading spaces then --flag
+        m = re.match(r'^(  )(--[a-z][-a-z]*)', line)
+        if m:
+            rest = line[m.end(2):]
+            # color all --flags in the rest of the line too
+            rest = re.sub(r'(--[a-z][-a-z]*)', f"{_GREEN}\\1{_RESET}", rest)
+            return f"{m.group(1)}{_GREEN}{m.group(2)}{_RESET}{rest}"
+        return line
+
+    sections = """\
 ASSEMBLY64 - C64 Scene Tool
 hackerswithstyle.se/leet/
 
@@ -2995,7 +3250,8 @@ COMMANDS
   reboot           Reboot the C64
   device/devices   List devices
   config           Show/set config
-  help             Show this help
+  favorites/fav    Browse saved favorites
+  help / --help / -h  Show this help
 
 SEARCH FLAGS
   --group  --handle  --repo  --cat
@@ -3042,9 +3298,15 @@ CONFIG FLAGS
   --remove NAME    Remove a device
   --set NAME       Set active device
   --next           Cycle to next device
-"""
 
-EXAMPLES = """
+FAVORITES FLAGS
+  --list           Flat list of all favorites
+  --remove ID      Remove favorite by item ID
+  --demos          Show demos favorites only
+  --music          Show music favorites only
+  --games          Show games favorites only
+  (etc. for any category name)
+
 EXAMPLES
   assembly64 search "edge of disgrace"
   assembly64 search --group fairlight
@@ -3071,13 +3333,14 @@ EXAMPLES
   assembly64 config --set U2L
   assembly64 config --next
   assembly64 config --remove U2L
+  assembly64 favorites
+  assembly64 favorites --list
+  assembly64 favorites --music
+  assembly64 favorites --demos
+  assembly64 favorites --remove 12345
 """
-
-
-def cmd_help(args):
-    print(FULL_HELP)
-    print(EXAMPLES)
-
+    for line in sections.splitlines():
+        print(_color_line(line))
 
 
 def build_parser():
@@ -3085,11 +3348,11 @@ def build_parser():
         prog="assembly64",
         description="C64 scene lookup via the Assembly64 API (hackerswithstyle.se/leet/)",
         formatter_class=ColoredHelpFormatter,
+        add_help=False,
     )
-    p.add_argument("--full-help", "--fullhelp", action="store_true", help="Show full help")
-    p.add_argument("--examples",  action="store_true", help="Show examples")
-    p.add_argument("--version",   action="store_true", help="Show version")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    p.add_argument("-h", "--help",    action="store_true", help="Show full help and examples")
+    p.add_argument("--version",       action="store_true", help="Show version")
+    sub = p.add_subparsers(dest="cmd")
 
     sub.add_parser("help", help="Show full help")
 
@@ -3185,28 +3448,39 @@ def build_parser():
 
     sub.add_parser("device",  aliases=["devices"], help="List configured Ultimate devices")
 
+    fv = sub.add_parser("favorites", aliases=["fav"], help="Browse saved favorites")
+    fv.add_argument("--list",   dest="list_all",   action="store_true", help="Flat list of all favorites")
+    fv.add_argument("--remove", dest="remove_id",  metavar="ID",        help="Remove favorite by item ID")
+    for _cat in _FAV_CAT_ORDER:
+        fv.add_argument(f"--{_cat}", action="store_true", help=f"Show only {_cat} favorites")
+
     return p
 
 
 def main():
     parser = build_parser()
+
     if len(sys.argv) == 1:
         parser.print_help()
         sys.exit(0)
 
-    # Handle --full-help, --fullhelp, --examples before subcommand parsing
+    if sys.argv[1] in ("-h", "--help", "help"):
+        cmd_help()
+        sys.exit(0)
+
     if "--version" in sys.argv:
         print(f"  assembly64  v{VERSION}  (build {BUILD})")
         sys.exit(0)
-    if "--full-help" in sys.argv or "--fullhelp" in sys.argv:
-        print(FULL_HELP)
-        print(EXAMPLES)
-        sys.exit(0)
-    if "--examples" in sys.argv:
-        print(EXAMPLES)
-        sys.exit(0)
 
     args = parser.parse_args()
+
+    if not args.cmd:
+        parser.print_help()
+        sys.exit(0)
+
+    if args.help:
+        cmd_help()
+        sys.exit(0)
 
     if args.cmd == "help":
         cmd_help(args)
@@ -3249,6 +3523,8 @@ def main():
             cmd_device_list(args)
         else:
             cmd_config(args)
+    elif args.cmd in ("favorites", "fav"):
+        cmd_favorites(args)
 
 
 if __name__ == "__main__":
