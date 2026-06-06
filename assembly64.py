@@ -3228,7 +3228,7 @@ COMMANDS
   device/devices   List devices
   config           Show/set config
   favorites/fav    Browse saved favorites
-  help             Show this help
+  help / --help / -h  Show this help
 
 SEARCH FLAGS
   --group  --handle  --repo  --cat
@@ -3320,10 +3320,24 @@ EXAMPLES
 """
 
 
+SHORT_USAGE = """assembly64  v{version}
+C64 scene lookup — hackerswithstyle.se/leet/
+
+  assembly64 <command> [options]
+
+Commands:
+  search   sid   charts   presets   cats
+  ls   push   pull   run   rrun   mount   rmount
+  mkdir   rename   delete   reset   reboot
+  device   config   favorites   help
+
+  -h / --help / assembly64 help   Full help & examples
+  --version                       Show version
+"""
+
 def cmd_help(args):
     print(FULL_HELP)
     print(EXAMPLES)
-
 
 
 def build_parser():
@@ -3331,11 +3345,11 @@ def build_parser():
         prog="assembly64",
         description="C64 scene lookup via the Assembly64 API (hackerswithstyle.se/leet/)",
         formatter_class=ColoredHelpFormatter,
+        add_help=False,
     )
-    p.add_argument("--full-help", "--fullhelp", action="store_true", help="Show full help")
-    p.add_argument("--examples",  action="store_true", help="Show examples")
-    p.add_argument("--version",   action="store_true", help="Show version")
-    sub = p.add_subparsers(dest="cmd", required=True)
+    p.add_argument("-h", "--help",    action="store_true", help="Show full help and examples")
+    p.add_argument("--version",       action="store_true", help="Show version")
+    sub = p.add_subparsers(dest="cmd")
 
     sub.add_parser("help", help="Show full help")
 
@@ -3442,23 +3456,30 @@ def build_parser():
 
 def main():
     parser = build_parser()
+
     if len(sys.argv) == 1:
-        parser.print_help()
+        print(SHORT_USAGE.format(version=VERSION))
         sys.exit(0)
 
-    # Handle --full-help, --fullhelp, --examples before subcommand parsing
-    if "--version" in sys.argv:
-        print(f"  assembly64  v{VERSION}  (build {BUILD})")
-        sys.exit(0)
-    if "--full-help" in sys.argv or "--fullhelp" in sys.argv:
+    if sys.argv[1] in ("-h", "--help", "help"):
         print(FULL_HELP)
         print(EXAMPLES)
         sys.exit(0)
-    if "--examples" in sys.argv:
-        print(EXAMPLES)
+
+    if "--version" in sys.argv:
+        print(f"  assembly64  v{VERSION}  (build {BUILD})")
         sys.exit(0)
 
     args = parser.parse_args()
+
+    if not args.cmd:
+        print(SHORT_USAGE.format(version=VERSION))
+        sys.exit(0)
+
+    if args.help:
+        print(FULL_HELP)
+        print(EXAMPLES)
+        sys.exit(0)
 
     if args.cmd == "help":
         cmd_help(args)

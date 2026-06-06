@@ -35,7 +35,7 @@ cp assembly64.py ~/.local/bin/assembly64.py
 
 ## Usage
 ```
-$ ./assembly64.py --fullhelp
+$ ./assembly64.py --help
 
 ASSEMBLY64 CLI - C64 Scene Lookup Tool
 APIS: hackerswithstyle.se/leet/
@@ -62,7 +62,7 @@ COMMANDS
   device/devices   List devices
   config           Show/set config
   favorites/fav    Browse saved favorites
-  help             Show this help
+  help / --help / -h  Show this help
 
 SEARCH FLAGS
   --group  --handle  --repo  --cat
