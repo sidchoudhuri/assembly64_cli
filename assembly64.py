@@ -8,6 +8,7 @@ import json
 import argparse
 import urllib.request
 import urllib.parse
+import datetime
 
 # https://github.com/sidchoudhuri/assembly64_cli
 BASE         = "https://hackerswithstyle.se/leet/"
@@ -72,6 +73,49 @@ def save_config(cfg):
     os.makedirs(CONFIG_DIR, exist_ok=True)
     with open(CONFIG_FILE, "w") as f:
         json.dump(cfg, f, indent=2)
+
+# ---------- Favorites ---------------------------------------------------------
+
+def favorites_list():
+    return load_config().get("favorites", [])
+
+def favorites_add(item):
+    cfg  = load_config()
+    favs = cfg.get("favorites", [])
+    iid  = str(item.get("id", ""))
+    cat  = item.get("category", "")
+    if any(str(f.get("id")) == iid and f.get("cat") == cat for f in favs):
+        print("  Already in favorites.")
+        return
+    cat_name = ""
+    for name, cid in CAT_IDS.items():
+        if cid == cat:
+            cat_name = name
+            break
+    favs.append({
+        "id":      iid,
+        "cat":     cat,
+        "cat_name": cat_name,
+        "title":   item.get("name", ""),
+        "group":   item.get("group") or item.get("handle") or "",
+        "year":    str(item.get("year") or ""),
+        "added":   datetime.date.today().isoformat(),
+    })
+    cfg["favorites"] = favs
+    save_config(cfg)
+    print(f"  Added to favorites: {item.get('name', '')}")
+
+def favorites_remove(iid, cat):
+    cfg  = load_config()
+    favs = cfg.get("favorites", [])
+    before = len(favs)
+    favs = [f for f in favs if not (str(f.get("id")) == str(iid) and f.get("cat") == cat)]
+    if len(favs) == before:
+        print("  Not found in favorites.")
+        return
+    cfg["favorites"] = favs
+    save_config(cfg)
+    print("  Removed from favorites.")
 
 # ---------- HTTP --------------------------------------------------------------
 
@@ -741,24 +785,32 @@ def action_prompt(run_ip, flipinfo=None, can_back=False):
         if has_flip:
             options.append(("autodisk", "Run with auto disk flip (you'll be asked for IP)"))
     options.append(("download", "Download"))
+    options.append(("favorite", "Add to favorites"))
     if can_back:
         options.append(("refine",   "Refine query"))
 
     print()
     for i, (_, label) in enumerate(options, 1):
         print(f"  [{i}] {label}")
+    extras = ["v=favorite"]
     if can_back:
-        print(f"  b=back  q=quit")
+        extras.append("b=back")
+    extras.append("q=quit")
+    print(f"  {'  '.join(extras)}")
     print()
-    choice = input("  Choose action (or Enter to quit): ").strip().lower()
+    choice = input("  Choose action: ").strip().lower()
     if not choice or choice == "q":
         return None
     if choice == "b" and can_back:
         return "back"
+    if choice == "v":
+        return "favorite"
     try:
         key, _ = options[int(choice) - 1]
         if key == "refine":
             return "refine"
+        if key == "favorite":
+            return "favorite"
         if key == "download":
             return ("download",)
         if key in ("run", "autodisk"):
@@ -1063,33 +1115,38 @@ def show_item(item, run_ip=None, download=False, show_files=False, autodisk=Fals
     for i, f in enumerate(entries, 1):
         print(f"    {i:>3}. {f.get('path','')}  ({f.get('size',0):,} bytes)")
 
-    action = action_prompt(run_ip=None, flipinfo=flipinfo, can_back=can_back)
-    if action is None:
+    while True:
+        action = action_prompt(run_ip=None, flipinfo=flipinfo, can_back=can_back)
+        if action is None:
+            return
+        if action in ("back", "refine"):
+            return action
+        if action == "favorite":
+            favorites_add(item)
+            continue
+        if action[0] in ("run", "autodisk"):
+            ip = action[1]
+            fi = flipinfo if action[0] == "autodisk" else None
+            handle_files(iid, cat, entries, run_ip=ip, download=False, flipinfo=fi,
+                         item_name=name, item_id=iid)
+        elif action[0] == "download":
+            target_dir = prompt_download_dir(name, iid, category=cat, multi_file=len(entries) > 1) if len(entries) > 1 else "."
+            if len(entries) == 1:
+                download_file(iid, cat, entries[0], target_dir=target_dir)
+            else:
+                choice = input("\n  Enter number to download (or Enter for all): ").strip()
+                if choice:
+                    try:
+                        entries = [entries[int(choice) - 1]]
+                    except (ValueError, IndexError):
+                        print("  Invalid -- downloading all.")
+                for f in entries:
+                    download_file(iid, cat, f, target_dir=target_dir)
+                if flipinfo and len(disks) > 1 and not choice:
+                    disk_filenames = [f.get("path","").replace("\\","/").split("/")[-1]
+                                      for f in disks]
+                    write_flip_file(flipinfo, disk_filenames, target_dir=target_dir, item_id=iid)
         return
-    if action in ("back", "refine"):
-        return action
-    if action[0] in ("run", "autodisk"):
-        ip = action[1]
-        fi = flipinfo if action[0] == "autodisk" else None
-        handle_files(iid, cat, entries, run_ip=ip, download=False, flipinfo=fi,
-                     item_name=name, item_id=iid)
-    elif action[0] == "download":
-        target_dir = prompt_download_dir(name, iid, category=cat, multi_file=len(entries) > 1) if len(entries) > 1 else "."
-        if len(entries) == 1:
-            download_file(iid, cat, entries[0], target_dir=target_dir)
-        else:
-            choice = input("\n  Enter number to download (or Enter for all): ").strip()
-            if choice:
-                try:
-                    entries = [entries[int(choice) - 1]]
-                except (ValueError, IndexError):
-                    print("  Invalid -- downloading all.")
-            for f in entries:
-                download_file(iid, cat, f, target_dir=target_dir)
-            if flipinfo and len(disks) > 1 and not choice:
-                disk_filenames = [f.get("path","").replace("\\","/").split("/")[-1]
-                                  for f in disks]
-                write_flip_file(flipinfo, disk_filenames, target_dir=target_dir, item_id=iid)
 
 # ---------- List helpers ------------------------------------------------------
 
@@ -2953,6 +3010,181 @@ def cmd_config(args):
         print("  (no config saved)")
     sep()
 
+# ---------- Favorites command -------------------------------------------------
+
+# Canonical category order for display
+_FAV_CAT_ORDER = ["demos", "games", "music", "graphics", "intros", "discmags",
+                  "tools", "sid", "misc", "c128", "bbs", "charts"]
+
+def _fav_cat_name(fav):
+    """Return display name for a favorite's category."""
+    name = fav.get("cat_name", "")
+    if name:
+        return name
+    cat_id = fav.get("cat")
+    if cat_id is not None:
+        for n, cid in CAT_IDS.items():
+            if cid == cat_id:
+                return n
+    return "other"
+
+def _fav_row(fav, show_cat=False):
+    title  = fav.get("title", "-")
+    group  = fav.get("group", "")
+    year   = fav.get("year", "")
+    extra  = "  ".join(filter(None, [group, year] + ([_fav_cat_name(fav)] if show_cat else [])))
+    return f"  {title}  [{extra}]" if extra else f"  {title}"
+
+def _open_favorite(fav):
+    """Reconstruct a minimal item dict and open show_item."""
+    item = {
+        "id":       fav.get("id"),
+        "category": fav.get("cat"),
+        "name":     fav.get("title", ""),
+        "group":    fav.get("group", ""),
+        "year":     fav.get("year", ""),
+    }
+    show_item(item, can_back=True)
+
+def cmd_favorites(args):
+    favs = favorites_list()
+
+    # --remove ID
+    if getattr(args, "remove_id", None):
+        # find by id substring match
+        rid = args.remove_id.strip()
+        matches = [f for f in favs if str(f.get("id")) == rid]
+        if not matches:
+            print(f"  No favorite with id '{rid}'.")
+            return
+        for f in matches:
+            favorites_remove(f["id"], f["cat"])
+        return
+
+    if not favs:
+        print("  No favorites saved yet.")
+        print("  Add items from the action prompt when viewing search results.")
+        return
+
+    # Determine filter category from --demos, --music etc.
+    filter_cat = None
+    for cat_name in _FAV_CAT_ORDER:
+        if getattr(args, cat_name, False):
+            filter_cat = cat_name
+            break
+
+    # --list or category filter: flat list
+    if getattr(args, "list_all", False) or filter_cat:
+        subset = favs
+        if filter_cat:
+            subset = [f for f in favs if _fav_cat_name(f) == filter_cat]
+        if not subset:
+            print(f"  No favorites in category '{filter_cat}'.")
+            return
+        title = f"FAVORITES › {filter_cat}" if filter_cat else "FAVORITES"
+        header(f"{title}  ({len(subset)})")
+        rows = [f"  {i:>3}. {_fav_row(f, show_cat=not bool(filter_cat))}"
+                for i, f in enumerate(subset, 1)]
+        while True:
+            idx = paginated_list(rows, "Enter number to open", can_modify=False, can_back=False)
+            if idx is None:
+                return
+            fav = subset[idx]
+            confirm = input(f"  [o]pen  [d]elete  [Enter=cancel]: ").strip().lower()
+            if confirm == "o":
+                _open_favorite(fav)
+            elif confirm == "d":
+                favorites_remove(fav["id"], fav["cat"])
+                subset.pop(idx)
+                rows.pop(idx)
+                for j in range(idx, len(rows)):
+                    rows[j] = f"  {j+1:>3}. " + rows[j].split(". ", 1)[1]
+                if not subset:
+                    print("  No more favorites in this list.")
+                    return
+
+    else:
+        # Category view
+        counts = {}
+        for f in favs:
+            cn = _fav_cat_name(f)
+            counts[cn] = counts.get(cn, 0) + 1
+
+        ordered = [c for c in _FAV_CAT_ORDER if c in counts]
+        ordered += sorted(c for c in counts if c not in _FAV_CAT_ORDER)
+
+        while True:
+            header(f"FAVORITES  ({len(favs)} saved)")
+            cat_rows = [f"  {i:>3}. {c:<16} ({counts[c]})"
+                        for i, c in enumerate(ordered, 1)]
+            for row in cat_rows:
+                print(row)
+            print()
+            choice = input("  Number to drill down,  l=list all  q=quit: ").strip().lower()
+            if not choice or choice == "q":
+                return
+            if choice == "l":
+                # flat list
+                rows = [f"  {i:>3}. {_fav_row(f, show_cat=True)}"
+                        for i, f in enumerate(favs, 1)]
+                subset = list(favs)
+                while True:
+                    idx = paginated_list(rows, "Enter number to open", can_back=True)
+                    if idx is None or idx == "back":
+                        break
+                    fav = subset[idx]
+                    confirm = input(f"  [o]pen  [d]elete  [Enter=cancel]: ").strip().lower()
+                    if confirm == "o":
+                        _open_favorite(fav)
+                    elif confirm == "d":
+                        favorites_remove(fav["id"], fav["cat"])
+                        cat_name = _fav_cat_name(fav)
+                        counts[cat_name] = counts.get(cat_name, 1) - 1
+                        if counts[cat_name] == 0:
+                            del counts[cat_name]
+                            if cat_name in ordered:
+                                ordered.remove(cat_name)
+                        subset.pop(idx)
+                        rows.pop(idx)
+                        for j in range(idx, len(rows)):
+                            rows[j] = f"  {j+1:>3}. " + rows[j].split(". ", 1)[1]
+                        if not subset:
+                            return
+                continue
+            try:
+                cat_name = ordered[int(choice) - 1]
+            except (ValueError, IndexError):
+                print("  Invalid.")
+                continue
+
+            subset = [f for f in favs if _fav_cat_name(f) == cat_name]
+            rows   = [f"  {i:>3}. {_fav_row(f)}" for i, f in enumerate(subset, 1)]
+            while True:
+                header(f"FAVORITES › {cat_name}  ({len(subset)})")
+                idx = paginated_list(rows, "Enter number to open", can_back=True)
+                if idx is None or idx == "back":
+                    break
+                fav = subset[idx]
+                confirm = input(f"  [o]pen  [d]elete  [Enter=cancel]: ").strip().lower()
+                if confirm == "o":
+                    _open_favorite(fav)
+                elif confirm == "d":
+                    favorites_remove(fav["id"], fav["cat"])
+                    counts[cat_name] -= 1
+                    subset.pop(idx)
+                    rows.pop(idx)
+                    for j in range(idx, len(rows)):
+                        rows[j] = f"  {j+1:>3}. " + rows[j].split(". ", 1)[1]
+                    if not subset:
+                        if counts[cat_name] == 0:
+                            del counts[cat_name]
+                            ordered.remove(cat_name)
+                        break
+            favs = favorites_list()
+            if not favs:
+                print("  No favorites remaining.")
+                return
+
 # ---------- Parser ------------------------------------------------------------
 
 def add_common(sp):
@@ -2995,6 +3227,7 @@ COMMANDS
   reboot           Reboot the C64
   device/devices   List devices
   config           Show/set config
+  favorites        Browse saved favorites
   help             Show this help
 
 SEARCH FLAGS
@@ -3042,6 +3275,14 @@ CONFIG FLAGS
   --remove NAME    Remove a device
   --set NAME       Set active device
   --next           Cycle to next device
+
+FAVORITES FLAGS
+  --list           Flat list of all favorites
+  --remove ID      Remove favorite by item ID
+  --demos          Show demos favorites only
+  --music          Show music favorites only
+  --games          Show games favorites only
+  (etc. for any category name)
 """
 
 EXAMPLES = """
@@ -3071,6 +3312,11 @@ EXAMPLES
   assembly64 config --set U2L
   assembly64 config --next
   assembly64 config --remove U2L
+  assembly64 favorites
+  assembly64 favorites --list
+  assembly64 favorites --music
+  assembly64 favorites --demos
+  assembly64 favorites --remove 12345
 """
 
 
@@ -3185,6 +3431,12 @@ def build_parser():
 
     sub.add_parser("device",  aliases=["devices"], help="List configured Ultimate devices")
 
+    fv = sub.add_parser("favorites", aliases=["fav"], help="Browse saved favorites")
+    fv.add_argument("--list",   dest="list_all",   action="store_true", help="Flat list of all favorites")
+    fv.add_argument("--remove", dest="remove_id",  metavar="ID",        help="Remove favorite by item ID")
+    for _cat in _FAV_CAT_ORDER:
+        fv.add_argument(f"--{_cat}", action="store_true", help=f"Show only {_cat} favorites")
+
     return p
 
 
@@ -3249,6 +3501,8 @@ def main():
             cmd_device_list(args)
         else:
             cmd_config(args)
+    elif args.cmd in ("favorites", "fav"):
+        cmd_favorites(args)
 
 
 if __name__ == "__main__":
