@@ -3320,21 +3320,6 @@ EXAMPLES
 """
 
 
-SHORT_USAGE = """assembly64  v{version}
-C64 scene lookup — hackerswithstyle.se/leet/
-
-  assembly64 <command> [options]
-
-Commands:
-  search   sid   charts   presets   cats
-  ls   push   pull   run   rrun   mount   rmount
-  mkdir   rename   delete   reset   reboot
-  device   config   favorites   help
-
-  -h / --help / assembly64 help   Full help & examples
-  --version                       Show version
-"""
-
 def cmd_help(args):
     print(FULL_HELP)
     print(EXAMPLES)
@@ -3458,7 +3443,7 @@ def main():
     parser = build_parser()
 
     if len(sys.argv) == 1:
-        print(SHORT_USAGE.format(version=VERSION))
+        parser.print_help()
         sys.exit(0)
 
     if sys.argv[1] in ("-h", "--help", "help"):
@@ -3473,7 +3458,7 @@ def main():
     args = parser.parse_args()
 
     if not args.cmd:
-        print(SHORT_USAGE.format(version=VERSION))
+        parser.print_help()
         sys.exit(0)
 
     if args.help:
