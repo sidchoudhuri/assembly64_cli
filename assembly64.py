@@ -3203,7 +3203,29 @@ def add_common(sp):
     sp.add_argument("--autodisk", action="store_true", help="Auto-flip disks using Assembly64 flip timings (--run required)")
 
 
-FULL_HELP = """
+def cmd_help(args=None):
+    import re
+
+    def _color_line(line):
+        # Section headers: ALL CAPS line with no leading spaces
+        if re.match(r'^[A-Z][A-Z/ -]{2,}$', line.rstrip()):
+            return f"{_YELLOW}{line}{_RESET}"
+        # Command lines: leading spaces then word(s) before whitespace gap to description
+        #   e.g. "  search [query]   Search releases"
+        #   color the command name(s) before the first big gap
+        m = re.match(r'^(  )([a-z][a-z0-9/._-]*)(\s)', line)
+        if m:
+            return f"{m.group(1)}{_CYAN}{m.group(2)}{_RESET}{line[m.end(2):]}"
+        # Flag lines: leading spaces then --flag
+        m = re.match(r'^(  )(--[a-z][-a-z]*)', line)
+        if m:
+            rest = line[m.end(2):]
+            # color all --flags in the rest of the line too
+            rest = re.sub(r'(--[a-z][-a-z]*)', f"{_GREEN}\\1{_RESET}", rest)
+            return f"{m.group(1)}{_GREEN}{m.group(2)}{_RESET}{rest}"
+        return line
+
+    sections = """\
 ASSEMBLY64 - C64 Scene Tool
 hackerswithstyle.se/leet/
 
@@ -3283,9 +3305,7 @@ FAVORITES FLAGS
   --music          Show music favorites only
   --games          Show games favorites only
   (etc. for any category name)
-"""
 
-EXAMPLES = """
 EXAMPLES
   assembly64 search "edge of disgrace"
   assembly64 search --group fairlight
@@ -3318,11 +3338,8 @@ EXAMPLES
   assembly64 favorites --demos
   assembly64 favorites --remove 12345
 """
-
-
-def cmd_help(args):
-    print(FULL_HELP)
-    print(EXAMPLES)
+    for line in sections.splitlines():
+        print(_color_line(line))
 
 
 def build_parser():
@@ -3447,8 +3464,7 @@ def main():
         sys.exit(0)
 
     if sys.argv[1] in ("-h", "--help", "help"):
-        print(FULL_HELP)
-        print(EXAMPLES)
+        cmd_help()
         sys.exit(0)
 
     if "--version" in sys.argv:
@@ -3462,8 +3478,7 @@ def main():
         sys.exit(0)
 
     if args.help:
-        print(FULL_HELP)
-        print(EXAMPLES)
+        cmd_help()
         sys.exit(0)
 
     if args.cmd == "help":
