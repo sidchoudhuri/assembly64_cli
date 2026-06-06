@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-VERSION = "1.0.4"
-BUILD   = "2026-06-05-1"
+VERSION = "1.0.5"
+BUILD   = "2026-06-06-1"
 
 import sys
 import os
@@ -3227,7 +3227,7 @@ COMMANDS
   reboot           Reboot the C64
   device/devices   List devices
   config           Show/set config
-  favorites        Browse saved favorites
+  favorites/fav    Browse saved favorites
   help             Show this help
 
 SEARCH FLAGS
